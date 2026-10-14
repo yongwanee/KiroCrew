@@ -25,7 +25,7 @@ from kiro_crew.session_environment import WORKSPACE_SERVER_NAME
 logger = logging.getLogger(__name__)
 
 WORKER_DIR = "$HOME/.kirocrew-worker"
-_WORKER_FILES = ("wire.py", "worker.py", "workspace_tools.py")
+_WORKER_FILES = ("wire.py", "worker.py", "workspace_tools.py", "git_proxy.py")
 _COMMAND_TIMEOUT = 120.0
 _OUTPUT_MAX = 64 * 1024
 #: Variables never handed to the dial/install commands' environment.
@@ -376,6 +376,17 @@ class RemoteWorkerLaunch:
         self.python = python
         self.link_options = dict(link_options or {})
         self.relay: Any = None
+        #: (worker id, link, serve task) while this session's git proxy runs.
+        self.git_proxy: Any = None
+        self._git_proxy_start: "asyncio.Future[None] | None" = None
+        #: The newest workspace relay: the one whose close stops the git proxy.
+        self._git_proxy_relay: Any = None
+        #: Where this launch's guest git proxy reports its port, relative to the
+        #: worker directory every guest worker starts in. One per launch: each
+        #: runtime (a subagent's included) runs its own proxy under its own
+        #: session key. The port alone grants no forwarding authority.
+        self.git_proxy_port_file = f"git-proxy-{os.urandom(6).hex()}.port"
+        self.git_proxy_secret = os.urandom(32).hex()
 
     async def install(self) -> None:
         await install_worker(self.shell)
@@ -397,18 +408,54 @@ class RemoteWorkerLaunch:
         # The relay starts a guest worker per connection; a restart replaces the old relay.
         await self.install()
         await self.reap_stale_workers()
+        # A restarted runtime's relay replaces the previous runtime's: close that.
+        # Not as the proxy's owner: the restart's own begin_git_proxy replaces it.
+        self._git_proxy_relay = None
         await self.close_relay()
         await self.confirm_earlier_workers_stopped()
         self.session_id = self.new_worker_id()
         # The token file is written later, into the runtime's private scratch.
-        relay = WorkspaceRelay(
+        git_secret = self.git_proxy_secret
+
+        class GitWorkspaceRelay(WorkspaceRelay):
+            async def _open_link(self) -> tuple[Any, str]:
+                link, worker_id = await super()._open_link()
+                try:
+                    await link.write(git_secret.encode("ascii") + b"\n")
+                except BaseException:
+                    with contextlib.suppress(Exception):
+                        await link.aclose()
+                    with contextlib.suppress(Exception):
+                        await self.launch.stop_worker(worker_id)
+                    raise
+                return link, worker_id
+
+            async def close(self) -> None:
+                await super().close()
+                # The git proxy lives as long as this session's CURRENT relay. A
+                # start can make more than one (an early tools probe, a respawn),
+                # and an older one closing on idle must not take the proxy away
+                # from the live one: _relay_closed checks which relay owns it.
+                with contextlib.suppress(Exception):
+                    await self.launch._relay_closed(self)
+
+        relay = GitWorkspaceRelay(
             self,
-            ["python3", "-u", "workspace_tools.py", "--root", workdir],
+            [
+                "python3",
+                "-u",
+                "workspace_tools.py",
+                "--root",
+                workdir,
+                "--git-proxy-port-file",
+                self.git_proxy_port_file,
+                "--git-proxy-secret-stdin",
+            ],
             new_token(),
             name=self.session_id,
         )
         port = await relay.start()
-        self.relay = relay
+        self.relay = self._git_proxy_relay = relay
         argv = platform_compat.isolated_python_argv(
             "-P",
             "-m",
@@ -526,6 +573,95 @@ class RemoteWorkerLaunch:
                 await self.stop_worker(worker_id)
             except Exception as exc:
                 raise RemoteWorkerError(EARLIER_WORKER_RUNNING) from exc
+
+    # -- git proxy ------------------------------------------------------------------
+    async def start_git_proxy(
+        self, session_key: str, *, agent: str, **channel_options: Any
+    ) -> None:
+        """Serve this session's guest git traffic from the gateway, credential here.
+
+        Starts ``git_proxy.py`` in the guest under its own worker and link, and a
+        :class:`~kiro_crew.remote_session.git_gateway.GitProxyChannel` that answers
+        it. Best effort: a failure leaves git without GitHub access in this
+        session, never the session without a workspace. Stopped by
+        :meth:`stop_git_proxy`, which the workspace relay calls when it closes.
+        """
+        from kiro_crew.remote_session.git_gateway import GitProxyChannel, GitProxyLink
+
+        await self._stop_running_git_proxy()
+        if not isinstance(agent, str) or not agent.strip():
+            logger.warning("git proxy: calling agent identity is required")
+            return
+        worker_id = self.new_worker_id()
+        secret = wire.new_secret()
+        try:
+            port = await self.start_worker(
+                worker_id,
+                ["python3", "-u", "git_proxy.py", "--port-file", self.git_proxy_port_file],
+                secret,
+            )
+        except RemoteWorkerError as exc:
+            logger.warning("git proxy: could not start in the workspace: %s", exc)
+            return
+        dial = self.dial(port)
+        # Same construction as the workspace relay's links (relay._open_link).
+        factory: Any = channel_options.pop("link_factory", None) or GitProxyLink
+        link = factory(worker_id, secret, dial, **self.link_kwargs())
+        link.start()
+        try:
+            await link.write(self.git_proxy_secret.encode("ascii") + b"\n")
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await link.aclose()
+            with contextlib.suppress(Exception):
+                await self.stop_worker(worker_id)
+            raise
+        channel = GitProxyChannel(link, session_key, agent=agent, **channel_options)
+        task = asyncio.ensure_future(channel.serve())
+        self.git_proxy = (worker_id, link, task)
+
+    async def _relay_closed(self, relay: Any) -> None:
+        """A workspace relay closed: stop the git proxy only if that relay owns it.
+
+        Compared against the owner, not ``self.relay``: :meth:`close_relay`
+        clears ``self.relay`` before the close runs this, on every runtime end.
+        """
+        if relay is self._git_proxy_relay:
+            self._git_proxy_relay = None
+            await self.stop_git_proxy()
+
+    def begin_git_proxy(self, session_key: str, *, agent: str, **channel_options: Any) -> None:
+        """Start the git proxy in the background: it must not delay the session start."""
+        if self._git_proxy_start is not None and not self._git_proxy_start.done():
+            return
+        self._git_proxy_start = asyncio.ensure_future(
+            self.start_git_proxy(session_key, agent=agent, **channel_options)
+        )
+
+    async def stop_git_proxy(self) -> None:
+        starting, self._git_proxy_start = self._git_proxy_start, None
+        if starting is not None and not starting.done():
+            # Let a start finish rather than cancel it mid-`coder ssh`: a cancelled
+            # start can leave its guest worker running with no id to stop it by.
+            await asyncio.gather(starting, return_exceptions=True)
+        await self._stop_running_git_proxy()
+
+    async def _stop_running_git_proxy(self) -> None:
+        current, self.git_proxy = self.git_proxy, None
+        if current is None:
+            return
+        worker_id, link, task = current
+        # End the proxy's input first: it then exits on its own and removes its
+        # port file, rather than being killed later with the file left behind.
+        with contextlib.suppress(Exception):
+            link.close_input()
+            await asyncio.wait_for(asyncio.shield(task), 5)
+        with contextlib.suppress(Exception):
+            await link.aclose()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        with contextlib.suppress(Exception):
+            await self.stop_worker(worker_id)
 
     def dial_env(self) -> dict[str, str]:
         return _scrubbed_env()

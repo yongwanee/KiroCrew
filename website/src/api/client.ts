@@ -957,9 +957,14 @@ export interface RemoteEnvironmentHealth {
   }
 }
 
+/** `withheld`: the 'strict' agent sandbox lends no gateway login to remote sessions. */
+export type GitLoginStatus = 'signed_in' | 'not_signed_in' | 'unchecked' | 'withheld'
+
 export interface SessionEnvironmentsCheck {
   coder: { ok: boolean; owner?: string; error?: string }
   profiles: { id: string; ok: boolean; error?: string }[]
+  /** Absent from a gateway that predates the git rows. */
+  git?: Record<string, GitLoginStatus>
 }
 
 export interface SessionEnvironmentWorkspace {

@@ -371,13 +371,23 @@ async def test_check_endpoint_reports_sign_in_and_each_profile(tmp_path, monkeyp
             KiroCrewConfig, "load", lambda: SimpleNamespace(session_environments=next(configs))
         )
         monkeypatch.setattr(session_launch.CoderSessionEnvironments, "_client", lambda self: fake)
+        # Git login rows come from their own reader; pinned here so this test reads
+        # only the Coder half (the stubbed config iterator feeds the Coder reads).
+        git = {"github.com": "signed_in"}
+        monkeypatch.setattr(
+            "kiro_crew.remote_session.git_gateway.git_readiness", AsyncMock(return_value=git)
+        )
         body = await (await client.post("/check")).json()
-        assert body == {"coder": {"ok": False, "error": "no Coder URL is saved"}, "profiles": []}
+        assert body == {
+            "coder": {"ok": False, "error": "no Coder URL is saved"},
+            "profiles": [],
+            "git": git,
+        }
         body = await (await client.post("/check")).json()
         # Coder's own words, not a guess that it is a sign-in problem (a timeout
         # or a bad identity reply needs a different fix); the card adds the
         # coder login hint itself.
-        assert body == {"coder": {"ok": False, "error": "signed out"}, "profiles": []}
+        assert body == {"coder": {"ok": False, "error": "signed out"}, "profiles": [], "git": git}
         fake.signed_in = True
         body = await (await client.post("/check")).json()
         assert body["coder"] == {"ok": True, "owner": "devuser"}
