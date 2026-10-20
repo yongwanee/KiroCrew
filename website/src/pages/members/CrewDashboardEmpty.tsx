@@ -68,6 +68,9 @@ export default function CrewDashboardEmpty({ member, displayName, avatar, onAct 
             <p className="mt-1 text-[13px] leading-relaxed text-text">
               {t('pages.membersPage.dashboard_empty_bubble_body')}
             </p>
+            <p className="mt-1 text-[13px] leading-relaxed text-text">
+              {t('pages.membersPage.dashboard_empty_bubble_own_page')}
+            </p>
           </div>
           {/* The bubble's tail, pointing at the face: a rotated square whose two
               visible edges continue the bubble's border. */}

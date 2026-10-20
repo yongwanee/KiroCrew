@@ -2269,6 +2269,33 @@ draft guard, so a veto neither remounts the card nor loses its pushed form.
   lands on a page nobody sees, so write the page and save and apply it; the
   member protocol's page item names the three parts `dashboard_save` takes as
   fields, `view.html` and theme.
+- the **`crewmate.dashboard_page` card** (`offer_dashboard_page`): the one way a
+  crewmate on a TEMPLATE page -- one the person adopted, or the page named for it
+  -- comes to replace it. `goal_reminder.dashboard_line` gives such a crewmate, in
+  place of the build line and under the same gate (a goal and confirmed
+  milestones), `page_offer.OFFER_LINE` naming the template, until it has been
+  asked once. The crewmate calls `offer_dashboard_page` in that same wake, so the
+  offer adds no turn of its own; the card (`change_card_dashboard_page.TITLE`,
+  "Want me to build a Dashboard page around your goal?", with a row naming the
+  template it replaces) writes nothing. Its one apply step is
+  `POST /api/members/{slug}/dashboard/page-offer` (`handlers/member_page_offer.py`),
+  owner-only and refused unless the card hook set `REQ_CARD_PAGE_OFFER_APPLY`; it
+  records the yes and wakes the crewmate once (`page_offer.write_prompt`, through
+  `goal_setup._schedule`) to write its page, `dashboard_save` it and
+  `dashboard_apply` it with no second card, then post the same one ready
+  message. A locked layout refuses that apply as it does any other, and the
+  crewmate says so once and stops; one `dashboard_rollback` brings the template
+  back. A no, or the card expiring, writes nothing. Asked-once is
+  `crew-panels/<slug>.page-offer.json` (`page_offer.record_path`, beyond the
+  crewmate's own shell), written when the card is raised, so a yes, a no and an
+  expiry all count: the line stops and the card's preview refuses a second offer
+  (`already_asked`), and also refuses a crewmate with nothing on its tab or a
+  page of its own (`not_on_a_template`) or with no goal and milestones yet
+  (`not_ready`). The kind is `catalog.SELF_ONLY_KINDS`: `list_change_kinds` leaves it
+  out and `propose_change` refuses it (`self_only`); it offers no Undo
+  (`offers_no_undo`). The card and the prompt lines make an offer of what the page
+  is for, never of what writing it takes. A person can still ask for a page in
+  chat at any time, and the crewmate writes it with no card.
 - the **`crewmate.check_ins` card** (`set_check_ins`): turns the Daily Goal
   Reminder, Weekly report, Monthly review and Heartbeat on or off and sets
   `weekday`, `month_day`, `time` and the heartbeat's `interval` (its rows read

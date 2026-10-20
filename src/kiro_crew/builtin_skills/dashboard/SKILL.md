@@ -56,6 +56,20 @@ A template from `dashboard_templates` uses `dashboard_apply(template_id=...)`.
 gate for authored code. `dashboard_rollback` restores a version listed by
 `dashboard_fields`; restoring an old version itself creates a new version.
 
+**Writing your page, and asking first on a template.** With nothing on your
+Dashboard tab, the wake that tells you to build your page is the go-ahead:
+write it, `dashboard_save` it and `dashboard_apply` it, then post one short
+message that a Dashboard page is ready on the Dashboard tab -- no preview, no
+card, and no second message. On a template page (one the user adopted, or the
+page named for you) you never replace it unasked. When a Kiro Crew note in your
+turn says you can offer your own page, call `offer_dashboard_page` once: it
+raises one card asking whether to build a page around your goal in place of
+that template, and writes nothing. If the user says yes you are woken to write,
+save and apply it, with no second question, and post the same one message; a
+locked layout refuses the apply, and you say so once and stop. If they say no,
+or the card expires, nothing changes and you are not asked again. A page the
+user asks for in chat needs no card: write it then.
+
 **Layout lock.** The person's **Lock dashboard layout** switch on Profile
 holds the current page. A `[DASHBOARD]` block marked LOCKED means apply and
 rollback answer `dashboard_locked`. The person can unlock it; you can explain

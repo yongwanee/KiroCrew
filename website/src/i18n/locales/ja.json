@@ -9800,6 +9800,8 @@
       "kind_crewmate_key_results": "マイルストーン",
       "primary_crewmate_key_results": "このマイルストーンを使う",
       "kind_crewmate_check_ins": "定期チェック",
+      "kind_crewmate_dashboard_page": "ダッシュボードページ",
+      "primary_crewmate_dashboard_page": "はい、ページを作って",
       "primary_crewmate_check_ins": "この定期チェックをオンにする",
       "field_key_results": "マイルストーン"
     },
@@ -18433,6 +18435,7 @@
       "dashboard_empty_region": "{{name}} のダッシュボード: まだページが選ばれていません",
       "dashboard_empty_bubble_title": "まだダッシュボードを用意していません。",
       "dashboard_empty_bubble_body": "一緒に用意すると、ここに表示されます: 主要な数値、現在の状況、あなたの判断が必要なこと。載せたい内容をチャットで教えてください。",
+      "dashboard_empty_bubble_own_page": "目標と確定したマイルストーンができたら、ここに自分のページを作ります。",
       "dashboard_empty_prompts_heading": "{{name}} への頼み方の例",
       "dashboard_empty_prompts_lead": "次のいずれかから始めてください。チャット欄に入るので、編集して送信できます。別の候補を選ぶと置き換わります。編集済みなら、その下に追加されます。",
       "dashboard_empty_prompt_set_up": "取り組んでいること、進み具合、次にやることを示すダッシュボードを用意して。",

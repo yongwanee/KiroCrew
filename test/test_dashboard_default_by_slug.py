@@ -358,14 +358,36 @@ class TestTheBuildYourPageLineNeverReplacesAPage:
 
         assert goal_reminder.dashboard_line("mate", {"goals": [], "key_results": [self.KR]}) == ""
 
-    def test_a_template_page_in_force_gets_no_line(self, builtin: Path) -> None:
+    def test_a_template_page_in_force_is_offered_never_rebuilt(self, builtin: Path) -> None:
+        """A template the person adopted is never replaced on a wake: the crewmate only
+        offers its own page, once, naming the template it would replace."""
+        from kiro_crew.dashboard import goal_reminder, page_offer
+
         instance.adopt("mate", "fixture-other")
         assert dashboard_agentic.tab_shows_suggestions("mate") is False
-        assert self._line("mate") == ""
+        line = self._line("mate")
+        assert line != goal_reminder.DASHBOARD_BUILD_LINE
+        assert "offer_dashboard_page" in line and "fixture-other template" in line
+        assert line == page_offer.OFFER_LINE.format(
+            replaces=", in place of the fixture-other template on your Dashboard tab"
+        )
 
-    def test_the_page_named_for_the_crewmate_gets_no_line(self, builtin: Path) -> None:
+    def test_the_page_named_for_the_crewmate_is_offered_never_rebuilt(self, builtin: Path) -> None:
+        from kiro_crew.dashboard import goal_reminder
+
         assert dashboard_agentic.tab_shows_suggestions(SLUG) is False
-        assert self._line(SLUG) == ""
+        line = self._line(SLUG)
+        assert line != goal_reminder.DASHBOARD_BUILD_LINE and "offer_dashboard_page" in line
+
+    def test_a_template_crewmate_asked_once_gets_no_line_again(self, builtin: Path) -> None:
+        from kiro_crew.dashboard import page_offer
+
+        instance.adopt("mate", "fixture-other")
+        assert self._line("mate") != ""
+        page_offer.record_asked("mate", "fixture-other")
+        assert self._line("mate") == ""
+        # A no or an expiry leaves the same record, so it counts the same.
+        assert page_offer.read_record("mate") == {"replaces": "fixture-other"}
 
     def test_a_bound_package_gets_no_line(self, builtin: Path) -> None:
         with patch.object(dashboard_agentic, "bound_package", return_value="my-pkg"):

@@ -1002,6 +1002,32 @@ def tab_shows_suggestions(slug: str) -> bool:
     return shows_suggestions(slug, record, package_slug=package_slug)
 
 
+def page_offer_target(slug: str) -> dict[str, str] | None:
+    """What a page crewmate *slug* writes for itself would replace, or ``None``.
+
+    ``{"replaces": <title>, "template_id": <id>}`` while a template page is in force,
+    whether the person adopted it or it is the page named for the crewmate. ``None``
+    for the suggestions page (that crewmate writes its page with no card), once the
+    crewmate has a page of its own (a package on screen, or one bound to it), or when
+    the tab cannot be read. The read route's own answers, so the card
+    names the page the person actually sees. TOTAL. Blocking IO.
+    """
+    try:
+        if bound_package(slug):
+            return None
+        record, manifest, _locked = _read_page(slug)
+        if record is None:
+            return None
+        if manifest is None:
+            return None
+        if manifest.id == _package_manifest_id() or str(getattr(record, "package_slug", "")):
+            return None
+        return {"replaces": str(manifest.title or manifest.id), "template_id": str(manifest.id)}
+    except Exception:
+        logger.debug("dashboard: %r's page offer target is unreadable", slug, exc_info=True)
+        return None
+
+
 #: The block for a crewmate whose tab shows the suggestions page. No fields and no
 #: upkeep pointer: with no page in force there is nothing to write.
 #: What a crewmate's turn says while its tab shows the suggestions page. It rides EVERY

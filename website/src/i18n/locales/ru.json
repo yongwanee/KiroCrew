@@ -10232,6 +10232,8 @@
       "kind_crewmate_key_results": "Вехи",
       "primary_crewmate_key_results": "Принять эти вехи",
       "kind_crewmate_check_ins": "Регулярные проверки",
+      "kind_crewmate_dashboard_page": "Страница панели",
+      "primary_crewmate_dashboard_page": "Да, создай мою страницу",
       "primary_crewmate_check_ins": "Включить эти проверки",
       "field_key_results": "Вехи"
     },
@@ -19306,6 +19308,7 @@
       "dashboard_empty_region": "Панель {{name}}: страница ещё не выбрана",
       "dashboard_empty_bubble_title": "Я ещё не настроил свою панель.",
       "dashboard_empty_bubble_body": "Как только мы её настроим, она появится здесь: ключевые цифры, как идут дела и что ждёт твоего решения. Напиши в чате, что ты хочешь на ней видеть.",
+      "dashboard_empty_bubble_own_page": "Когда у меня появятся цель и подтверждённые вехи, я создам здесь свою страницу.",
       "dashboard_empty_prompts_heading": "Можешь попросить {{name}}",
       "dashboard_empty_prompts_lead": "Начни с одного из этих вариантов. Он попадёт в поле чата, где ты сможешь его изменить и отправить. Другой вариант заменит его, а если ты его менял, добавится ниже.",
       "dashboard_empty_prompt_set_up": "Настрой панель, которая показывает, над чем ты работаешь, как идут дела и что дальше.",

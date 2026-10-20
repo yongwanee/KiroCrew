@@ -9944,6 +9944,8 @@
       "kind_crewmate_key_results": "মাইলফলক",
       "primary_crewmate_key_results": "এই মাইলফলকগুলো নাও",
       "kind_crewmate_check_ins": "নিয়মিত চেক",
+      "kind_crewmate_dashboard_page": "ড্যাশবোর্ড পেজ",
+      "primary_crewmate_dashboard_page": "হ্যাঁ, আমার পেজ বানাও",
       "primary_crewmate_check_ins": "এই নিয়মিত চেকগুলো চালু করো",
       "field_key_results": "মাইলফলক"
     },
@@ -18724,6 +18726,7 @@
       "dashboard_empty_region": "{{name}}-এর ড্যাশবোর্ড: এখনও কোনো পেজ বেছে নেওয়া হয়নি",
       "dashboard_empty_bubble_title": "আমি এখনও আমার ড্যাশবোর্ড সাজাইনি।",
       "dashboard_empty_bubble_body": "আমরা একটি সেট আপ করলেই এটি এখানে দেখাবে: মূল সংখ্যা, কাজ কোথায় দাঁড়িয়ে, আর কোন বিষয়ে তোমার সিদ্ধান্ত দরকার। চ্যাটে বলো এতে তুমি কী দেখতে চাও।",
+      "dashboard_empty_bubble_own_page": "আমার একটা লক্ষ্য আর নিশ্চিত মাইলস্টোন হলে, আমি এখানে নিজের একটা পেজ বানাব।",
       "dashboard_empty_prompts_heading": "তুমি {{name}}-কে বলতে পারো",
       "dashboard_empty_prompts_lead": "এগুলোর একটি দিয়ে শুরু করো। এটি তোমার চ্যাট বক্সে চলে যাবে, সেখানে সম্পাদনা করে পাঠাতে পারবে। অন্যটি বাছলে এটি বদলে যাবে, আর তুমি সম্পাদনা করে থাকলে তার নিচে যোগ হবে।",
       "dashboard_empty_prompt_set_up": "একটি ড্যাশবোর্ড সেট আপ করো যা দেখাবে তুমি কী নিয়ে কাজ করছ, কাজ কেমন চলছে আর এরপর কী।",

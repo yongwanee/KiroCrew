@@ -10088,6 +10088,8 @@
       "kind_crewmate_key_results": "Traguardi",
       "primary_crewmate_key_results": "Usa questi traguardi",
       "kind_crewmate_check_ins": "Controlli periodici",
+      "kind_crewmate_dashboard_page": "Pagina della dashboard",
+      "primary_crewmate_dashboard_page": "Sì, crea la mia pagina",
       "primary_crewmate_check_ins": "Attiva questi controlli",
       "field_key_results": "Traguardi"
     },
@@ -19015,6 +19017,7 @@
       "dashboard_empty_region": "Dashboard di {{name}}: nessuna pagina ancora scelta",
       "dashboard_empty_bubble_title": "Non ho ancora impostato la mia dashboard.",
       "dashboard_empty_bubble_body": "Appena ne prepariamo una, compare qui: i numeri chiave, a che punto sono le cose e cosa richiede una tua decisione. Dimmi in chat cosa vuoi vederci.",
+      "dashboard_empty_bubble_own_page": "Quando avrò un obiettivo e traguardi confermati, creerò qui una pagina mia.",
       "dashboard_empty_prompts_heading": "Potresti chiedere a {{name}}",
       "dashboard_empty_prompts_lead": "Parti da uno di questi. Finisce nella casella della chat, dove puoi modificarlo e inviarlo. Sceglierne un altro lo sostituisce, o si aggiunge sotto se l'hai modificato.",
       "dashboard_empty_prompt_set_up": "Imposta una dashboard che mostri su cosa stai lavorando, come sta andando e cosa viene dopo.",

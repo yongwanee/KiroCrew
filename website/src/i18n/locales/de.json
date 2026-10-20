@@ -9944,6 +9944,8 @@
       "kind_crewmate_key_results": "Meilensteine",
       "primary_crewmate_key_results": "Diese Meilensteine übernehmen",
       "kind_crewmate_check_ins": "Check-ins",
+      "kind_crewmate_dashboard_page": "Dashboard-Seite",
+      "primary_crewmate_dashboard_page": "Ja, baue meine Seite",
       "primary_crewmate_check_ins": "Diese Check-ins einschalten",
       "field_key_results": "Meilensteine"
     },
@@ -18724,6 +18726,7 @@
       "dashboard_empty_region": "Dashboard von {{name}}: noch keine Seite gewählt",
       "dashboard_empty_bubble_title": "Ich habe mein Dashboard noch nicht eingerichtet.",
       "dashboard_empty_bubble_body": "Sobald wir eines eingerichtet haben, erscheint es hier: wichtige Zahlen, der aktuelle Stand und was deine Entscheidung braucht. Sag mir im Chat, was darauf stehen soll.",
+      "dashboard_empty_bubble_own_page": "Sobald ich ein Ziel und bestätigte Meilensteine habe, baue ich hier eine eigene Seite.",
       "dashboard_empty_prompts_heading": "Du könntest {{name}} fragen",
       "dashboard_empty_prompts_lead": "Starte mit einem dieser Vorschläge. Er landet in deinem Chatfeld zum Bearbeiten und Senden. Ein anderer ersetzt ihn, oder kommt darunter, wenn du ihn bearbeitet hast.",
       "dashboard_empty_prompt_set_up": "Richte ein Dashboard ein, das zeigt, woran du arbeitest, wie es läuft und was als Nächstes kommt.",

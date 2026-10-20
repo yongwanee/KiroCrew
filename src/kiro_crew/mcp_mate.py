@@ -342,6 +342,22 @@ def _tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "offer_dashboard_page",
+            "description": (
+                "Offer, once, to build a Dashboard page around your goal: this raises one "
+                "card and writes nothing. Call it only when a Kiro Crew note in your turn "
+                "says you can offer one. If the user says yes you are woken to write the "
+                "page; if they say no, or let the card expire, nothing changes and you do "
+                "not ask again. A page the user asks for in chat needs no card: write it. "
+                + _CARD_NOTE
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"reason": {"type": "string", "maxLength": 500}},
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "key_result_progress",
             "description": (
                 "Record a fresh reading for one key result by its id: current is what you "
@@ -469,6 +485,7 @@ _PROPOSALS = {
     "set_goal": "goal",
     "set_key_results": "key_results",
     "set_check_ins": "check_ins",
+    "offer_dashboard_page": "dashboard_page",
 }
 
 

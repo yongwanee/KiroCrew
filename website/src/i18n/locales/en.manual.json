@@ -4196,6 +4196,8 @@
       "kind_crewmate_key_results": "Milestones",
       "primary_crewmate_key_results": "Use these milestones",
       "kind_crewmate_check_ins": "Check-ins",
+      "kind_crewmate_dashboard_page": "Dashboard page",
+      "primary_crewmate_dashboard_page": "Yes, build my page",
       "primary_crewmate_check_ins": "Turn on these check-ins",
       "field_key_results": "Milestones"
     },

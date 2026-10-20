@@ -9944,6 +9944,8 @@
       "kind_crewmate_key_results": "माइलस्टोन",
       "primary_crewmate_key_results": "ये माइलस्टोन अपनाओ",
       "kind_crewmate_check_ins": "नियमित जाँच",
+      "kind_crewmate_dashboard_page": "डैशबोर्ड पेज",
+      "primary_crewmate_dashboard_page": "हाँ, मेरा पेज बनाओ",
       "primary_crewmate_check_ins": "ये नियमित जाँच चालू करो",
       "field_key_results": "माइलस्टोन"
     },
@@ -18724,6 +18726,7 @@
       "dashboard_empty_region": "{{name}} का डैशबोर्ड: अभी कोई पेज नहीं चुना गया",
       "dashboard_empty_bubble_title": "मैंने अभी तक अपना डैशबोर्ड सेट नहीं किया है।",
       "dashboard_empty_bubble_body": "जैसे ही हम एक सेट कर लेंगे, वह यहाँ दिखेगा: मुख्य आँकड़े, काम कहाँ तक पहुँचा, और किस पर तुम्हारा फ़ैसला चाहिए। चैट में बताओ कि तुम इस पर क्या देखना चाहते हो।",
+      "dashboard_empty_bubble_own_page": "जब मेरे पास एक लक्ष्य और पक्के माइलस्टोन होंगे, मैं यहाँ अपना एक पेज बनाऊँगा।",
       "dashboard_empty_prompts_heading": "तुम {{name}} से कह सकते हो",
       "dashboard_empty_prompts_lead": "इनमें से किसी एक से शुरू करो। यह तुम्हारे चैट बॉक्स में आ जाएगा, जहाँ तुम इसे बदलकर भेज सकते हो। दूसरा चुनने पर यह बदल जाएगा, या अगर तुमने इसे बदला है तो उसके नीचे जुड़ जाएगा।",
       "dashboard_empty_prompt_set_up": "एक डैशबोर्ड सेट करो जो दिखाए कि तुम किस पर काम कर रहे हो, काम कैसा चल रहा है और आगे क्या है।",

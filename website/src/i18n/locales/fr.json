@@ -10088,6 +10088,8 @@
       "kind_crewmate_key_results": "Jalons",
       "primary_crewmate_key_results": "Utiliser ces jalons",
       "kind_crewmate_check_ins": "Points réguliers",
+      "kind_crewmate_dashboard_page": "Page du tableau de bord",
+      "primary_crewmate_dashboard_page": "Oui, crée ma page",
       "primary_crewmate_check_ins": "Activer ces points réguliers",
       "field_key_results": "Jalons"
     },
@@ -19015,6 +19017,7 @@
       "dashboard_empty_region": "Tableau de bord de {{name}} : aucune page choisie pour l'instant",
       "dashboard_empty_bubble_title": "Je n'ai pas encore configuré mon tableau de bord.",
       "dashboard_empty_bubble_body": "Dès qu'on en aura mis un en place, il s'affichera ici : les chiffres clés, où en sont les choses et ce qui attend ta décision. Dis-moi dans le chat ce que tu veux y voir.",
+      "dashboard_empty_bubble_own_page": "Dès que j’aurai un objectif et des jalons confirmés, je créerai ici une page à moi.",
       "dashboard_empty_prompts_heading": "Tu pourrais demander à {{name}}",
       "dashboard_empty_prompts_lead": "Commence par l'une de ces suggestions. Elle est placée dans ta zone de chat pour que tu la modifies et l'envoies. En choisir une autre la remplace, ou s'ajoute en dessous si tu l'as modifiée.",
       "dashboard_empty_prompt_set_up": "Mets en place un tableau de bord qui montre sur quoi tu travailles, où tu en es et ce qui vient ensuite.",

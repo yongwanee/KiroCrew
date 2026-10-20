@@ -10088,6 +10088,8 @@
       "kind_crewmate_key_results": "Hitos",
       "primary_crewmate_key_results": "Usar estos hitos",
       "kind_crewmate_check_ins": "Revisiones",
+      "kind_crewmate_dashboard_page": "Página del panel",
+      "primary_crewmate_dashboard_page": "Sí, crea mi página",
       "primary_crewmate_check_ins": "Activar estas revisiones",
       "field_key_results": "Hitos"
     },
@@ -19015,6 +19017,7 @@
       "dashboard_empty_region": "Panel de {{name}}: aún no se ha elegido ninguna página",
       "dashboard_empty_bubble_title": "Todavía no he configurado mi panel.",
       "dashboard_empty_bubble_body": "En cuanto preparemos uno, aparecerá aquí: las cifras clave, cómo van las cosas y lo que necesita tu decisión. Dime en el chat qué quieres que muestre.",
+      "dashboard_empty_bubble_own_page": "Cuando tenga un objetivo e hitos confirmados, crearé aquí una página propia.",
       "dashboard_empty_prompts_heading": "Podrías pedirle a {{name}}",
       "dashboard_empty_prompts_lead": "Empieza con una de estas. Se coloca en tu cuadro de chat para que la edites y la envíes. Si eliges otra, la reemplaza, o se añade debajo si ya la editaste.",
       "dashboard_empty_prompt_set_up": "Configura un panel que muestre en qué estás trabajando, cómo va y qué sigue.",

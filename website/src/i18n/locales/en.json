@@ -8014,6 +8014,7 @@
       "dashboard_empty_region": "{{name}}'s dashboard: no page chosen yet",
       "dashboard_empty_bubble_title": "I haven't set up my dashboard yet.",
       "dashboard_empty_bubble_body": "Once we set one up, it shows here: key numbers, where things stand, what needs your decision. Tell me in the chat what you want on it.",
+      "dashboard_empty_bubble_own_page": "Once I have a goal and confirmed milestones, I'll build a page of my own here.",
       "dashboard_empty_prompts_heading": "You could ask {{name}}",
       "dashboard_empty_prompts_lead": "Start from one of these. It goes into your chat box to edit and send. Picking another replaces it, or adds below it if you've edited it.",
       "dashboard_empty_prompt_set_up": "Set up a dashboard showing what you're working on, how it's going, and what's next.",

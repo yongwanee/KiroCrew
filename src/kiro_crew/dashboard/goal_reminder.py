@@ -299,19 +299,23 @@ def knows_its_page(rec: dict[str, Any]) -> bool:
     return member_goals.has_goal(rec) and bool(rec.get("key_results"))
 
 
-def dashboard_line(slug: str, rec: dict[str, Any]) -> str:
-    """The build-your-page line for crewmate *slug*, or ``""``.
+def dashboard_line(slug: str, rec: dict[str, Any], *, has_mate_tools: bool = True) -> str:
+    """The build-your-page line for crewmate *slug*, the one-time page offer, or ``""``.
 
-    Only while its Dashboard tab shows nothing of its own: no package bound to it
+    The build line only while its Dashboard tab shows nothing of its own: no package bound to it
     (:func:`kiro_crew.dashboard_agentic.bound_package`) and the suggestions page
     (:func:`kiro_crew.dashboard_agentic.tab_shows_suggestions`, the read route's own
     answer), so a template page the person picked, or the page named for the
-    crewmate, is never replaced on a wake. And only once *rec* holds a goal and
+    crewmate, is never replaced on a wake: a crewmate on a template page gets the
+    one-time offer instead (:func:`kiro_crew.dashboard.page_offer.offer_line`), a card
+    the person answers. Either only once *rec* holds a goal and
     confirmed milestones (:func:`knows_its_page`), so the page has something to be
     about. With ``agent.crew_panel`` off (:func:`kiro_crew.members.crew_panel_enabled`)
     no DM session mounts ``kirocrew-panel``, so there are no ``dashboard_save`` /
-    ``dashboard_apply`` tools and no line. An empty *slug*, or a lookup that fails,
-    gets no line. Blocking IO.
+    ``dashboard_apply`` tools and neither line. The offer needs
+    ``offer_dashboard_page`` (``kirocrew-mate``), so a crewmate without those tools
+    (*has_mate_tools* False) gets no offer line. An empty *slug*, or a lookup that
+    fails, gets no line. Blocking IO.
     """
     if not slug or not knows_its_page(rec):
         return ""
@@ -330,7 +334,11 @@ def dashboard_line(slug: str, rec: dict[str, Any]) -> str:
         if dashboard_agentic.bound_package(slug):
             return ""
         if not dashboard_agentic.tab_shows_suggestions(slug):
-            return ""
+            # A template page is on the tab: never replaced on a wake, only offered,
+            # once, on a card (``page_offer``).
+            from kiro_crew.dashboard import page_offer
+
+            return page_offer.offer_line(slug, rec) if has_mate_tools else ""
     except Exception:
         logger.debug("dashboard line for %s: page lookup failed", slug, exc_info=True)
         return ""
@@ -566,7 +574,11 @@ async def fire(state: Any, job: Any) -> str:
     finished: list[dict[str, str]] = []
     dashboard = ""
     if cadence == member_goals.CADENCE_DAILY:
-        dashboard = await asyncio.to_thread(dashboard_line, slug, rec)
+        from kiro_crew.member_mate_tools import member_has_mate_tools
+
+        dashboard = await asyncio.to_thread(
+            lambda: dashboard_line(slug, rec, has_mate_tools=member_has_mate_tools(member))
+        )
         # The binding read ran off the loop: a turn may have started meanwhile.
         again, skip = _idle_thread(state, slot_key, member)
         if skip:
