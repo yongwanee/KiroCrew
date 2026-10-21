@@ -444,7 +444,20 @@ def _url_payload_command(n: int) -> str:
 #: leaves joining the override arm, and the resolved-root list it reads, in
 #: ``paths_targets``; and one ``or`` clause, its import and three ``TYPE_CHECKING``
 #: lines in ``paths``. The registry lives in ``agent_sdk``.
-_PACKAGE_LINE_BUDGET = 32_111
+#:
+#: Raised by 319, from 32,111, for the redaction tiers' rules: signing names as
+#: labels and order-free key-ID pairing (``redaction_labels``), the normalised view
+#: read only around changed characters (``changed_windows``), the stream's hold
+#: table of declared triggers (``_hold_start``, ``_label_still_arriving``,
+#: ``_wrapped_block_start``), the vendor catalog's keyword index
+#: (``_keyword_index``, ``catalog_keyword_start``) and the decode keyword gate.
+#: The shared value predicate lives outside the package (``credential_values``).
+#: Blocking reads one predicate on the text and its normalised view
+#: (``blocking_context``, ``_view_blocks``), a view window grows to the end of a
+#: match it cuts (``_view_spans``), and the hold on a multi-word label still
+#: arriving is built from the label word table (``_PARTIAL_LABEL_RE``). It is new
+#: rule logic, not glue; nothing else moved.
+_PACKAGE_LINE_BUDGET = 32_430
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second

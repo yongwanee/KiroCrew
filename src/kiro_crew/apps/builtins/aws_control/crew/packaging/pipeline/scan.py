@@ -21,17 +21,6 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-# The AWS key-ID prefix group is taken from ``kiro_crew.credential_patterns`` when
-# that import works, because a second hand-written copy of it is exactly the drift a
-# repo guard exists to catch (``test_no_module_spells_the_prefix_group_by_hand``).
-# The literal fallback keeps this module runnable standalone, which is the property
-# that lets it be exercised as ``python -m packaging.build`` from the crew directory
-# alone -- so the fallback is the exception, not the normal path.
-try:  # pragma: no cover - exercised by whichever branch the environment allows
-    from kiro_crew.credential_patterns import AWS_KEY_ID_PREFIXES as _AWS_KEY_PREFIXES
-except Exception:  # pragma: no cover
-    _AWS_KEY_PREFIXES = "AKIA|ASIA"
-
 # The vendor and forge token spellings are imported from the shared module so this
 # subset cannot drift from the scrubber: a format added there reaches here with no
 # edit, and no one-sided omission can hide. The fallback restates the same shapes
@@ -56,12 +45,27 @@ _VENDOR_TOKEN_COMPILED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (label, re.compile(rf"\b{fragment}\b")) for label, fragment in _VENDOR_TOKEN_PATTERNS
 )
 
+# A presigned/signed link's signing value, sourced from the shared module so this
+# subset cannot drift from it. The key ID (``AKIA`` / ``ASIA``, ``X-Amz-Credential``)
+# is Identifier tier and stays allowed; what this refuses is the VALUE that makes the
+# link work -- the SigV4/SigV2 signature and the session token -- so a bundle cannot
+# ship a live bearer link. The fallback restates the same three alternatives for the
+# standalone case where ``kiro_crew`` is not importable.
+try:  # pragma: no cover - exercised by whichever branch the environment allows
+    from kiro_crew.credential_patterns import URL_SIGNING_VALUE as _URL_SIGNING_VALUE
+except Exception:  # pragma: no cover
+    _URL_SIGNING_VALUE = (
+        r"""(?i:X-Amz-Signature|X-Amz-Security-Token)["']?\s*[:=]\s*["']?[^\s"'&;#<>)\]}]+"""
+        r"""|(?:[?&]|&amp;|%26)(?i:Signature)(?:=|%3[Dd])[^\s"'&;#<>)\]}]+"""
+        r"""|(?i:Signature)(?:=|%3[Dd])[0-9a-fA-F]{64,}(?![0-9A-Za-z])"""
+    )
+
 _HARD_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("aws-access-key", re.compile(rf"\b(?:{_AWS_KEY_PREFIXES})[0-9A-Z]{{16}}\b")),
-    # A LABELLED secret. The pattern above matches an AWS key ID, which has a
-    # recognisable prefix; the secret access key is 40 characters of base64 with no
-    # prefix at all, so nothing above can see it and `SecretAccessKey=<secret>` in a
-    # prompt reached the deployed image. What makes it findable is the label, which is
+    # No AWS access key ID (``AKIA`` / ``ASIA``) row: it is Identifier tier, so a bundle
+    # that names one is not refused.
+    # A LABELLED secret. The secret access key is 40 characters of base64 with no
+    # prefix at all, so `SecretAccessKey=<secret>` in a prompt reached the deployed
+    # image until this pattern. What makes it findable is the label, which is
     # how this repo's own detector finds it (`security.py:_HARD_CREDENTIAL_RE`,
     # described in security_posture.py as covering "labelled secret-access-key and
     # session-token forms"). Spelled here from that same shape, and the canonical
@@ -74,6 +78,11 @@ _HARD_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             re.IGNORECASE,
         ),
     ),
+    # A presigned/signed link's signing value. Dropping the AKIA row above left the
+    # standalone fallback with nothing that refused a signed link, so a bundle exported
+    # without ``kiro_crew`` installed shipped a live SigV4/SigV2 bearer link intact. The
+    # key ID stays allowed; only the signature and session token are refused.
+    ("aws-signing-parameter", re.compile(_URL_SIGNING_VALUE)),
     ("private-key", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----")),
     # The same header after URL or form encoding, where the spaces have become ``+`` or
     # ``%20``. The shared detector spells its separator ``[\s+%]`` for exactly this, and
@@ -121,8 +130,7 @@ class Leak:
 #: local ``_HARD_PATTERNS`` above is a self-contained SUBSET and was documented as a
 #: real narrowing; a review then found the exact gap that narrowing left (a labelled
 #: AWS secret access key). So prefer the canonical one and keep the subset as the
-#: fallback that lets this module run without ``kiro_crew`` installed -- the same
-#: bargain ``_AWS_KEY_PREFIXES`` strikes, for the same reason.
+#: fallback that lets this module run without ``kiro_crew`` installed.
 try:  # pragma: no cover - exercised by whichever branch the environment allows
     from kiro_crew.security import _HARD_CREDENTIAL_RE
 

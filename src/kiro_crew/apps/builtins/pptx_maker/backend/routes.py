@@ -82,7 +82,6 @@ from kiro_crew.apps.builtins.pptx_maker.backend import (
 )
 from kiro_crew.apps.manager import is_app_enabled
 from kiro_crew.atomic_write import atomic_write
-from kiro_crew.credential_patterns import AWS_KEY_ID
 from kiro_crew.executors import subprocess_executor
 from kiro_crew.hooks import FileTooLargeError
 from kiro_crew.messaging.raster import SNIFF_BYTES, sniff_raster_mime
@@ -179,7 +178,7 @@ _INLINE_BITMAP_RE = re.compile(
 # A `data:image/...;base64,` label is agent-authored and therefore a CLAIM, not
 # a fact — excising on the label alone would let a model smuggle a credential
 # past the scanner simply by wrapping it in a fake bitmap URI
-# (`data:image/png;base64,AKIA…`, which is all base64-alphabet and so matches
+# (`data:image/png;base64,<secret>`, which is all base64-alphabet and so matches
 # the body pattern). So a blob is excised only if its decoded head actually
 # begins with a real raster signature, as decided by the shared sniffer
 # (:mod:`kiro_crew.messaging.raster`). Verifying the first few bytes is enough
@@ -192,25 +191,6 @@ _INLINE_BITMAP_RE = re.compile(
 # at an offset rather than at byte 0.
 _BITMAP_FTYP_OFFSET = 4
 _BITMAP_FTYP_MAGIC = b"ftyp"
-
-
-# The one credential shape that can hide INSIDE a base64 body while decoding to noise.
-# An AWS key id is a fixed 4-char prefix plus exactly 16 upper/digit chars — all of it
-# base64 alphabet — so it can be smuggled as body text and reproduced by the re-encode.
-# Chance collision is negligible (~1.6e-7 per 20 KB raster) because the 16-char body is
-# required; matching a BARE 4-char prefix instead blanks real pictures at
-# 0.88% per 20 KB and 4.7% per 100 KB.
-#
-# Every other provider marker (`xox…`, `sk-ant…`, `gh[pousr]_…`, `pypi-`, `glpat-`, a
-# JWT's `.`) needs a separator that is NOT in the base64 alphabet, so it cannot occur in
-# a body at all. Listing those here would be dead code — the appended-credential case
-# they were meant to catch is handled by requiring a proper URI terminator after the
-# body (see `_BITMAP_URI_TERMINATORS`), which covers every separator rather than an
-# enumerated few.
-#
-# Case-sensitive on purpose: the shared spelling's uppercase-only body over a
-# lowercased body would match ordinary mixed-case base64 constantly.
-_ENCODED_CREDENTIAL_RE = re.compile(AWS_KEY_ID)
 
 
 # Characters that legitimately END a `data:` URI in the artifact formats the engine
@@ -256,23 +236,11 @@ def _scanned_bitmap_bytes(b64_body: str) -> tuple[bytes | None, bool]:
     Returns the BYTES, not a boolean, so the caller restores a re-encoding of exactly
     what was cleared rather than the original matched text.
 
-    **Both the DECODED bytes and the ENCODED text are scanned, and the second is not
-    redundant.** Scanning only the decoded copy left a real channel open, because a
-    credential appended to a genuine raster's body is still valid base64:
-
-        data:image/png;base64,<real PNG body>AKIAIOSFODNN7EXAMPLE
-
-    `_INLINE_BITMAP_RE`'s `[A-Za-z0-9+/=]+` swallows the whole run, the head still
-    carries a PNG signature, and base64-decoding the appended ASCII yields binary
-    NOISE — so the decoded-bytes scan legitimately finds nothing, and the exemption
-    was granted. The key then reached the dashboard verbatim in the served text,
-    because re-encoding reproduces it exactly. Verified before this change.
-
-    So the encoded form is screened too: it is the form that is actually SERVED, and
-    an `AKIA…`/`ASIA…` key is itself base64-alphabet text, which is precisely why it
-    can hide in a body while being invisible after decoding. A genuine raster's
-    base64 is high-entropy and does not contain a credential pattern, so this costs
-    nothing on the honest path.
+    Only the DECODED bytes are scanned. A secret marker (`xox…`, `sk-ant…`,
+    `gh[pousr]_…`, a JWT's `.`) needs a separator outside the base64 alphabet, so it
+    cannot sit inside a body, and a credential appended after the body is refused by
+    the URI terminator check. An AWS access key ID can sit inside a body, but it is
+    Identifier tier, so it is not a reason to refuse the image.
 
     The guard that keeps :data:`_INLINE_BITMAP_RE`'s excision from becoming a
     smuggling channel — see :func:`_has_bitmap_signature`. It asks TWO questions, and the
@@ -283,7 +251,7 @@ def _scanned_bitmap_bytes(b64_body: str) -> tuple[bytes | None, bool]:
     2. **Does the DECODED payload contain a credential?** A correct signature only
        proves the first eight bytes; every container here (PNG `tEXt`, JPEG `COM`,
        EXIF, WebP `XMP `) has a metadata chunk that can hold arbitrary text. A blob
-       beginning `\\x89PNG…` and continuing `tEXtComment\\0AKIA…` passed the header
+       beginning `\\x89PNG…` and continuing `tEXtComment\\0ghp_…` passed the header
        check, was exempted from the scan, and carried the key to the browser
        verbatim. So a signature is necessary but NOT sufficient: a blob whose bytes
        contain credential material stays in the redaction path and is scanned like
@@ -304,19 +272,6 @@ def _scanned_bitmap_bytes(b64_body: str) -> tuple[bytes | None, bool]:
     # a blob it leaves untouched is safe to exempt.
     probe = raw.decode("utf-8", errors="replace")
     if redact(probe) != probe:
-        return None, True
-    # And scan the ENCODED text, which is the form actually served. See the docstring:
-    # a credential appended to a real raster's body decodes to noise (so the check
-    # above passes) but survives re-encoding intact.
-    #
-    # `_ENCODED_CREDENTIAL_RE`, not `redact()`. A full `redact()` here is unusable: its
-    # bare-secret heuristic flags a 40-char run of random base64, which every genuine
-    # raster contains — measured, it refused 300/300 real 20 KB rasters, i.e. it would
-    # blank every image in every deck. That is the same looks-secure-renders-blank
-    # failure `_INLINE_BITMAP_RE` exists to avoid, so the encoded pass matches only
-    # STRUCTURED credential markers, which random base64 does not produce by chance.
-    #
-    if _ENCODED_CREDENTIAL_RE.search(b64_body):
         return None, True
     return raw, False
 

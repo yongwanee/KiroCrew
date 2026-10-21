@@ -83,8 +83,40 @@ def redact(text: str) -> str:
 # it is a non-secret header string and the final full-text pass still redacts
 # the persisted/displayed copy.)
 _CRED_CLASS: frozenset[str] = frozenset(
-    string.ascii_letters + string.digits + "_-+/=.:@%~" + '"' + "'" + "?&#"
+    string.ascii_letters
+    + string.digits
+    + "_-+/=.:@%~"
+    + '"'
+    + "'"
+    + "?&#"
+    # A JSON escape, a control character and an invisible format character are
+    # characters the batch pass reads THROUGH (``redaction_normalise``), so one
+    # inside a token must not end its run either.
+    + "\\"
+    + "".join(chr(c) for c in range(0x20) if chr(c) not in "\t\n\r")
+    + "\x7f\u00ad\u200b\u200c\u200d\u2060\ufeff"
 )
+
+#: A terminal escape sequence ending at the cut: the batch pass drops it whole, so
+#: the trailing run continues through it.
+_CSI_TAIL_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]?\Z")
+#: How far back a CSI sequence ending at the cut is looked for.
+_CSI_REACH = 32
+
+
+def _natural_cut(buf: str) -> int:
+    """Start of the trailing run of credential-class characters, through escape sequences."""
+    cut = len(buf)
+    while cut > 0:
+        if buf[cut - 1] in _CRED_CLASS:
+            cut -= 1
+            continue
+        csi = _CSI_TAIL_RE.search(buf, max(0, cut - _CSI_REACH), cut)
+        if csi is None:
+            break
+        cut = csi.start()
+    return cut
+
 
 # Upper bound on withheld trailing characters. Larger than the longest
 # fixed-format credential so a split token is always rejoined before emission;
@@ -178,7 +210,8 @@ def _partial_jwt_tail(buf: str) -> re.Match[str] | None:
 # and stream its raw tail.
 _BEARER_ANCHOR_PARTIAL_RE = re.compile(
     r"""Authorization["']?\s*[:=]\s*["']?"""
-    rf"(?:Bearer(?:\s+{_BEARER_VALUE_CLASS}*)?|Beare|Bear|Bea|Be|B)?\Z",
+    rf"(?:(?:Bearer|Basic|Token)(?:\s+{_BEARER_VALUE_CLASS}*)?"
+    r"|Beare|Bear|Bea|Be|B|Basi|Bas|Ba|Toke|Tok|To|T)?\Z",
     re.IGNORECASE,
 )
 
@@ -210,11 +243,11 @@ def _aws_label_cut(buf: str, key_start: int) -> tuple[int, bool]:
     inside = False
     if key_start > 0:
         spans = []
-        for match in _submodule("redaction")._credential_matches(buf):
-            if match.start() >= key_start:
+        for start, end in _batch_spans(buf, with_labels=False):
+            if start >= key_start:
                 break
-            inside = inside or key_start < match.end()
-            spans.append(match.span())
+            inside = inside or key_start < end
+            spans.append((start, end))
         # Latest start first, so a span that crosses an earlier move is seen too.
         # A match can start mid-token, so each move walks back to whitespace
         # again: a bare secret glued in front of the match stays whole.
@@ -222,6 +255,20 @@ def _aws_label_cut(buf: str, key_start: int) -> tuple[int, bool]:
             if start < cut < end:
                 cut = _token_start(buf, start)
     return cut, inside
+
+
+def _batch_spans(buf: str, *, with_labels: bool) -> list[tuple[int, int]]:
+    """The batch pass's fixed-pattern matches and labelled values in *buf*, by start.
+
+    A labelled value spans from its label's start when *with_labels* (a cut must
+    not separate the two), else from the value's start (a key name inside a
+    VALUE is part of that credential, not a label of its own).
+    """
+    redaction = _submodule("redaction")
+    spans = [match.span() for match in redaction._credential_matches(buf)]
+    for span in redaction.label_spans(buf):
+        spans.append((span.start - len(span.label) if with_labels else span.start, span.end))
+    return sorted(spans)
 
 
 def _token_start(buf: str, pos: int) -> int:
@@ -315,9 +362,7 @@ class StreamRedactor:
         # PHASE A -- SAFETY CUT.
         # Invariant: every candidate can only move the cut backward. Bytes before
         # the minimum do not bisect any known in-progress credential anchor.
-        natural_cut = len(self._buf)
-        while natural_cut > 0 and self._buf[natural_cut - 1] in _CRED_CLASS:
-            natural_cut -= 1
+        natural_cut = _natural_cut(self._buf)
         partial_jwt = _partial_jwt_tail(self._buf)
         safety_cuts = [natural_cut]
 
@@ -382,6 +427,39 @@ class StreamRedactor:
                     # cut back into the run before it; release it as main does.
                     aws_keyed_anchor = None
 
+        # The context rules need more than the value in one batch call: a key ID
+        # beside a 40-character secret (either order), an AWS label written with
+        # no separator, a ``name``/``value`` pair. Hold from where such a match
+        # starts until its reach has arrived (``redaction_labels.stream_hold_start``).
+        # WEAK: it never raises the cap or arms a drop, and the reach is under the
+        # 512 floor.
+        context_hold = _submodule("redaction_labels").stream_hold_start(self._buf)
+        if context_hold is not None and aws_keyed_anchor is None:
+            hold_cut = _token_start(self._buf, context_hold)
+            # Never hold from inside a labelled value: the cut would part the
+            # value from its label. Move it back to where that match starts.
+            # Nor from inside a key ID and its paired secret: the window that
+            # holds the secret must hold its key ID too, or it is released bare.
+            pairs: list[tuple[int, int]] = []
+            _submodule("redaction_labels").paired_secret_spans(self._buf, pairs)
+            for start, end in [*_batch_spans(self._buf, with_labels=True), *pairs]:
+                if start < hold_cut < end:
+                    hold_cut = _token_start(self._buf, start)
+            # A hold past the floor would only move the floor's cut; a STRONG
+            # anchor's cut already governs the buffer it is in.
+            if len(self._buf) - hold_cut <= _STREAM_HOLDBACK_MAX:
+                safety_cuts.append(hold_cut)
+        # A labelled quoted value is held to its closing quote, as far as the
+        # batch rule reads one: past the floor, but bounded (QUOTED_HOLD_REACH).
+        labels = _submodule("redaction_labels")
+        quoted_start = labels.open_quoted_start(self._buf)
+        quoted_reach = False
+        if quoted_start is not None and aws_keyed_anchor is None and bearer_anchor is None:
+            quoted_cut = _token_start(self._buf, quoted_start)
+            if len(self._buf) - quoted_cut <= labels.QUOTED_HOLD_REACH:
+                safety_cuts.append(quoted_cut)
+                quoted_reach = True
+
         # A token-name prefix without '=' is WEAK. It still needs a short
         # holdback so a chunk boundary cannot split the name, but it is not yet a
         # credential and must never escalate the cap or authorize data loss.
@@ -423,6 +501,8 @@ class StreamRedactor:
         # WEAK name prefixes never drop data. Any forced cut is repaired before
         # emission so it cannot strand an anchor-less token-value suffix.
         cap = _STREAM_HOLDBACK_MAX
+        if quoted_reach and not strong_anchored:
+            cap = max(cap, _submodule("redaction_labels").QUOTED_HOLD_REACH)
         if len(self._buf) - i > cap and strong_anchored:
             cap = _STREAM_HOLDBACK_JWT_MAX
         if len(self._buf) - i > cap:
@@ -536,9 +616,9 @@ class StreamRedactor:
             # split (a PEM hold can keep one buffered after its value ended):
             # its tail would stream with no label left to redact it.
             if aws_label_seen:
-                for match in _redaction._credential_matches(self._buf):
-                    if match.start() < i < match.end():
-                        i = match.end()
+                for start, end in _batch_spans(self._buf, with_labels=True):
+                    if start < i < end:
+                        i = end
 
             # Repair the complete-match cut first, then preserve a trailing WEAK
             # prefix if that repair crossed it. An encoded separator is at most

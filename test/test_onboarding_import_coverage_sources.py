@@ -531,7 +531,7 @@ class TestLineageMemoryDatabase:
         scan = _scan(tmp_path, "predecessor")
         _lineage_db(
             scan.root / "memory.db",
-            semantic=[("pref.key", '"AKIAIOSFODNN7EXAMPLE"', 1.0, 0, "default", None)],
+            semantic=[("pref.key", '"glpat-IOSFODNN7EXAMPLE"', 1.0, 0, "default", None)],
         )
 
         lineage_source._scan_lineage_memory_db(scan)
@@ -615,7 +615,7 @@ class TestLineageMemoryDatabase:
         scan = _scan(tmp_path, "predecessor")
         _lineage_db(
             scan.root / "memory.db",
-            episodic=[("e1", "the key is AKIAIOSFODNN7EXAMPLE", 0.5, 0, "", None)],
+            episodic=[("e1", "the key is glpat-IOSFODNN7EXAMPLE", 0.5, 0, "", None)],
         )
 
         lineage_source._scan_lineage_memory_db(scan)
@@ -870,7 +870,7 @@ class TestSkillPackaging:
     def test_a_credential_bearing_asset_drops_the_package(self, tmp_path: Path) -> None:
         scan = _scan(tmp_path, "codex")
         manifest = self._skill(scan.root, "demo")
-        (manifest.parent / "notes.md").write_text("AKIAIOSFODNN7EXAMPLE", encoding="utf-8")
+        (manifest.parent / "notes.md").write_text("glpat-IOSFODNN7EXAMPLE", encoding="utf-8")
 
         assert onboarding_scan._skill_package(scan, scan.root, manifest) is None
         assert "credential_bearing_skill" in _reasons(scan)

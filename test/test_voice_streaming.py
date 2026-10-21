@@ -417,7 +417,7 @@ async def test_cli_diagnostic_uses_composed_log_redaction(
     proc = RawPiper()
     proc.returncode = 1
     proc.stdout.feed_eof()
-    proc.stderr.feed_data(b"native failure: SSO-COOKIE AKIAIOSFODNN7EXAMPLE")
+    proc.stderr.feed_data(b"native failure: SSO-COOKIE glpat-IOSFODNN7EXAMPLE")
     proc.stderr.feed_eof()
     monkeypatch.setattr(voice, "create_subprocess_limited", AsyncMock(return_value=proc))
     set_context(replace(build_default_context(KiroCrewConfig()), credentials=Policy()))
@@ -430,7 +430,7 @@ async def test_cli_diagnostic_uses_composed_log_redaction(
         expected = LOG_WITHHELD_PLACEHOLDER if composition_failed else "[REDACTED-SSO]"
         assert expected in caplog.text
         assert "SSO-COOKIE" not in caplog.text
-        assert "AKIAIOSFODNN7EXAMPLE" not in caplog.text
+        assert "glpat-IOSFODNN7EXAMPLE" not in caplog.text
         assert proc.reaped and not cleanup.exists()
     finally:
         reset_context()
@@ -569,8 +569,8 @@ def test_chinese_and_long_unpunctuated_text_keep_every_character():
 
 
 def test_phrase_redaction_is_applied_after_markdown_stripping():
-    phrases = voice._piper_phrases("Key: AKIAIOSFOD**NN7EXAMPLE**。下一句。")
-    assert "AKIAIOSFODNN7EXAMPLE" not in "".join(phrases)
+    phrases = voice._piper_phrases("Key: glpat-IOSFOD**NN7EXAMPLE**。下一句。")
+    assert "glpat-IOSFODNN7EXAMPLE" not in "".join(phrases)
 
 
 @pytest.fixture

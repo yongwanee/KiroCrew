@@ -217,12 +217,12 @@ class TestRunCommandSandboxed:
         longer matches and the raw tail reaches the cron result.
         """
         # Built at runtime so no credential-shaped literal lands in the repo.
-        fake_key = "AKIA" + "B" * 16  # matches the AWS access-key-id pattern
+        fake_key = "xoxb-" + "B" * 15  # matches the Slack token pattern
         # Sized so the 1000-char tail window starts 2 chars into the credential:
         # a slice-then-redact order keeps "IA" + all 16 B's but drops the
         # "AK" prefix, so the pattern does not match and the tail leaks.
         padding = "p" * 100
-        trailing = "e" * 982
+        trailing = "." * 982  # the token body cannot absorb a "."
         stderr_text = padding + fake_key + trailing
         assert len(stderr_text) - 1000 == len(padding) + 2
         mock_proc = MagicMock()
@@ -231,12 +231,12 @@ class TestRunCommandSandboxed:
         with patch("subprocess.Popen", return_value=mock_proc):
             result = run_command_sandboxed("boom")
         assert result["status"] == "error"
-        assert "B" * 16 not in result["output"]
+        assert "B" * 15 not in result["output"]
         assert fake_key not in result["output"]
         # Positive proof the payload flowed through redaction (not a vacuous
         # pass on an empty result): the marker's tail survives the tail slice.
         assert "credential]" in result["output"]
-        assert "e" * 50 in result["output"]
+        assert "." * 50 in result["output"]
 
     def test_nonzero_exit_short_stderr_stays_whole(self):
         """A stderr already shorter than the 1000-char bound is kept whole."""
@@ -680,13 +680,13 @@ class TestRunScriptSandboxed:
             'import sys\n'
             'sys.stderr.write("W" * 900 + "\\n")\n'
             'sys.stderr.flush()\n'
-            'raise RuntimeError("boom AKIAIOSFODNN7EXAMPLE")\n',
+            'raise RuntimeError("boom xoxb-IOSFODNN7EXAMPL")\n',
         )
         with patch("pathlib.Path.home", return_value=tmp_path):
             result = run_script_sandboxed(script_path + ":run", "test-job-id")
 
         assert result["status"] == "error"
-        assert "AKIAIOSFODNN7EXAMPLE" not in result["error"]
+        assert "xoxb-IOSFODNN7EXAMPL" not in result["error"]
         assert "[REDACTED" in result["error"]
 
     def test_a_credential_straddling_the_bound_does_not_leak_a_fragment(
@@ -709,7 +709,7 @@ class TestRunScriptSandboxed:
             tmp_path,
             'import os, sys\n'
             'sys.stderr.write("W" * 300)\n'
-            'sys.stderr.write("AKIAIOSFODNN7EXAMPLE")\n'
+            'sys.stderr.write("xoxb-IOSFODNN7EXAMPL")\n'
             'sys.stderr.write("X" * 481)\n'
             'sys.stderr.flush()\n'
             'os._exit(2)\n',
@@ -718,7 +718,7 @@ class TestRunScriptSandboxed:
             result = run_script_sandboxed(script_path + ":run", "test-job-id")
 
         assert result["status"] == "error"
-        assert "AKIAIOSFODNN7EXAMPLE" not in result["error"]
+        assert "xoxb-IOSFODNN7EXAMPL" not in result["error"]
         # The discriminator: the exact fragment the slice-then-redact order
         # leaves behind. Absent under redact-then-slice; present under the bug.
         assert "KIAIOSFODNN7EXAMPLE" not in result["error"]
@@ -1368,11 +1368,11 @@ class TestMcpToolClient:
     def test_stderr_tail_redacts_credentials(self, tmp_path):
         from kiro_crew.cron_script import McpToolClient
         stderr_path = tmp_path / "stderr.log"
-        stderr_path.write_text("boom AKIA1234567890123456 failure")
+        stderr_path.write_text("boom xoxb-123456789012345 failure")
         client = object.__new__(McpToolClient)
         client._stderr_file = SimpleNamespace(name=str(stderr_path))
         tail = client._stderr_tail()
-        assert "AKIA1234567890123456" not in tail
+        assert "xoxb-123456789012345" not in tail
         assert "boom" in tail
 
     def test_stderr_tail_redacts_credential_straddling_the_slice_boundary(self, tmp_path):
@@ -1388,16 +1388,16 @@ class TestMcpToolClient:
         from kiro_crew.cron_script import McpToolClient
         stderr_path = tmp_path / "stderr.log"
         filler = "x" * 1000
-        # Synthetic key id: deliberately well-formed so the redaction regex has
+        # Synthetic token: deliberately well-formed so the redaction regex has
         # a real target; it is not a credential.
-        secret = "AKIA" + "1234567890123456"
+        secret = "gl" + "pat-" + "12345678901234567890"
         stderr_path.write_text(filler + secret + "x" * 1006 + " failure")
         client = object.__new__(McpToolClient)
         client._stderr_file = SimpleNamespace(name=str(stderr_path))
         tail = client._stderr_tail()
         assert len(tail) <= 1024
         assert secret not in tail
-        assert "AKIA" not in tail
+        assert "pat-1234" not in tail
         assert re.search(r"\d{4,}", tail) is None
         assert "failure" in tail
 
@@ -1437,14 +1437,14 @@ class TestMcpToolClient:
 
         stderr_path = tmp_path / "stderr.log"
         noise = ("log line\n" * (4 * cron_script._STDERR_TAIL_READ_SPAN // 9))
-        # Synthetic key id, split so no scanner reads it as a credential.
-        payload = noise + "key " + "AKIA" + "1234567890123456" + "\nfailure"
+        # Synthetic token, split so no scanner reads it as a credential.
+        payload = noise + "key " + "gl" + "pat-" + "12345678901234567890" + "\nfailure"
         stderr_path.write_text(payload)
         client = object.__new__(McpToolClient)
         client._stderr_file = SimpleNamespace(name=str(stderr_path))
         tail = client._stderr_tail()
         assert len(tail) <= 1024
-        assert "AKIA" not in tail
+        assert "pat-1234" not in tail
         assert tail.endswith("failure")
 
     def test_stderr_tail_drops_the_line_severed_by_the_read_start(self, tmp_path):
@@ -1504,7 +1504,7 @@ class TestMcpToolClient:
         from kiro_crew.cron_script import McpToolClient
         stderr_path = tmp_path / "stderr.log"
         # Long innocuous query (>= 200 chars) triggers redact_exfiltration_urls'
-        # length-based heuristic. We can't use a credential-shaped value (AKIA,
+        # length-based heuristic. We can't use a credential-shaped value (xoxb-,
         # base64 blob) because redact_credentials runs first and would replace
         # it before the URL redactor sees it, leaving a short benign query.
         long_query = "data=" + ("a" * 250)
@@ -1568,7 +1568,7 @@ class TestScriptContextNotify:
         with patch(
             "kiro_crew.cron_script.loopback_urlopen", return_value=mock_response
         ) as mock_urlopen:
-            ctx.notify("secret AKIA1234567890123456 text")
+            ctx.notify("secret xoxb-123456789012345 text")
             # Verify the request was made (redaction happens internally)
             mock_urlopen.assert_called_once()
 
@@ -2268,12 +2268,12 @@ class TestRunScriptSandboxedErrorPaths:
         the raw head reaches the diagnostic.
         """
         # Built at runtime so no credential-shaped literal lands in the repo.
-        fake_key = "AKIA" + "B" * 16  # matches the AWS access-key-id pattern
+        fake_key = "xoxb-" + "B" * 15  # matches the Slack token pattern
         # Sized so the 200-char head window ends 10 chars into the credential:
-        # a slice-then-redact order keeps "AKIA" + 6 B's — too short for the
+        # a slice-then-redact order keeps "xoxb-" + 6 B's — too short for the
         # pattern to match, so the raw head leaks into the diagnostic.
         padding = "p" * 190
-        stdout_text = padding + fake_key + "e" * 50
+        stdout_text = padding + fake_key + "." * 50
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.communicate.return_value = (stdout_text, "")
@@ -2284,7 +2284,7 @@ class TestRunScriptSandboxedErrorPaths:
         ):
             result = run_script_sandboxed("/f.py:run", "j1", "")
         assert result["status"] == "error"
-        assert "AKIA" not in result["error"]
+        assert "xoxb-" not in result["error"]
         assert fake_key not in result["error"]
         # Positive proof the payload flowed through redaction (not a vacuous
         # pass on an empty diagnostic): the 200-char head window ends 10 chars
@@ -2318,14 +2318,14 @@ class TestRunScriptSandboxedErrorPaths:
             return real_redact(text)
 
         monkeypatch.setattr(cron_script, "redact", _spy)
-        fake_key = "AKIA" + "B" * 16  # matches the AWS access-key-id pattern
+        fake_key = "xoxb-" + "B" * 15  # matches the Slack token pattern
         # The -500 cut lands ONE character into the key: slice-then-redact
         # would leak the 19-char fragment, and a window that failed to reach
         # back past the cut would leak it the same way.
         # Newline-separated filler: the window then starts inside an ordinary
         # short line, so only that line's severed remainder is masked and the
         # straddling credential is still exercised against the pattern pass.
-        stderr_text = ("n" * 100 + "\n") * 200 + "W" * 300 + fake_key + "X" * 481
+        stderr_text = ("n" * 100 + "\n") * 200 + "W" * 300 + fake_key + "." * 481
         mock_proc = MagicMock()
         mock_proc.returncode = 1
         mock_proc.communicate.return_value = ("", stderr_text)
@@ -2365,7 +2365,7 @@ class TestRunScriptSandboxedErrorPaths:
             return real_redact(text)
 
         monkeypatch.setattr(cron_script, "redact", _spy)
-        fake_key = "AKIA" + "B" * 16  # matches the AWS access-key-id pattern
+        fake_key = "xoxb-" + "B" * 15  # matches the Slack token pattern
         # The 200-char head cut lands 10 chars into the key; the trailing run
         # pushes the capture far past the window so the bound is discriminating.
         stdout_text = "p" * 190 + fake_key + "e" * 30000

@@ -60,7 +60,6 @@ from .exfil_url_rules import (
 )
 from .redaction import (
     _contains_fixed_credential,
-    _text_contains_bare_secret,
     redact_credentials,
 )
 
@@ -1146,14 +1145,6 @@ def diagnose_oauth_url_credential(
                 url,
                 candidate,
                 _contains_fixed_credential,
-                decoder=decoder,
-            )
-        if _text_contains_bare_secret(candidate):
-            return _oauth_url_payload_diagnostic(
-                f"credential_scan_bare_secret_{suffix}",
-                url,
-                candidate,
-                _text_contains_bare_secret,
                 decoder=decoder,
             )
 

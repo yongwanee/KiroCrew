@@ -1529,8 +1529,9 @@ _REDACTION_SINKS: tuple[tuple[str, str, str], ...] = (
         "teammate and require a history rewrite to recall. The pre-push scan takes the "
         "UNION of `security.get_credential_patterns()` and this app's own "
         "`secrets.redact_tokens`, because neither is a superset: the core patterns "
-        "carry AKIA/ASIA and miss a prefixed Datadog application key, while "
-        "redact_tokens knows the provider shapes and misses an AWS access key id. A "
+        "carry the vendor and labelled AWS secret shapes and miss a prefixed Datadog "
+        "application key, while redact_tokens knows the provider shapes and misses "
+        "shapes only the core knows. A "
         "flagged line REFUSES the push rather than redacting it in place — the ledger "
         "is the operator's own knowledge and silently rewriting it would destroy the "
         "lesson — and the refusal reports line NUMBERS only, never the matched text, "
@@ -3009,7 +3010,8 @@ NON_EGRESS_REDACTION_MODULES: frozenset[str] = frozenset(
 _CREDENTIAL_FAMILIES: tuple[tuple[str, str], ...] = (
     (
         "AWS access keys",
-        "AKIA / ASIA key IDs, plus labelled secret-access-key and session-token forms",
+        "labelled secret-access-key and session-token forms; AKIA / ASIA key IDs "
+        "are identifiers and stay visible",
     ),
     (
         "Private keys",
@@ -3031,6 +3033,10 @@ _CREDENTIAL_FAMILIES: tuple[tuple[str, str], ...] = (
     ("Google OAuth secrets", "GOCSPX- client secrets"),
     ("Telegram bot tokens", "numeric bot id joined to a URL-safe secret"),
     ("JWT / JWE tokens", "3-segment signed and 5-segment encrypted compact tokens"),
+    (
+        "Request signatures",
+        "SigV4 request signatures and the signature of a presigned or signed link",
+    ),
     # Phrased WITHOUT a literal "Authorization: Bearer <token>" sequence: that
     # exact shape is what the scanner matches, so spelling it out here would make
     # this very description self-redacting wherever the payload is itself scanned

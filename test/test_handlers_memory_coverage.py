@@ -33,7 +33,7 @@ from kiro_crew.embeddings import CustomModelSpec
 
 _MOD = "kiro_crew.dashboard.handlers.memory"
 
-_CRED = "AKIAIOSFODNN7EXAMPLE"
+_CRED = "glpat-IOSFODNN7EXAMPLE"
 
 
 class _BadJSON:

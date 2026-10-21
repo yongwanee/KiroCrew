@@ -23,7 +23,7 @@ import re
 from collections.abc import Iterator
 
 import kiro_crew.security.pem_scan as pem_scan
-from kiro_crew.credential_patterns import AWS_KEY_ID, JWT_MULTI_SEGMENT
+from kiro_crew.credential_patterns import JWT_MULTI_SEGMENT
 
 # ── Credential Output Redaction ──
 # Catches raw credential patterns in LLM output / tool results,
@@ -53,26 +53,20 @@ from kiro_crew.credential_patterns import AWS_KEY_ID, JWT_MULTI_SEGMENT
 #                            relaxation is caught.
 #   * Making a branch CASE-INSENSITIVE -> the anchor MUST use the same regex
 #                            engine. A case-sensitive literal cannot gate a
-#                            `(?i:…)` branch, and neither can `str.lower()` —
-#                            see `_CREDENTIAL_PREFILTER_AUTHORIZATION_RE` for the
-#                            bypass that cost.
+#                            `(?i:…)` branch, and neither can `str.lower()`:
+#                            the two fold case differently (dotless i, long s,
+#                            Kelvin sign), so a `.lower()` anchor misses text
+#                            the branch matches.
 _CREDENTIAL_PATTERNS = re.compile(
     r"(?:"
     # ── AWS ──
-    f"{AWS_KEY_ID}"  # AWS access key ID (shared spelling: credential_patterns)
-    # key-value forms: tolerate an optional closing quote after the key name and an
-    # optional opening quote before the value so JSON (`"aws_secret_access_key": "v"`)
-    # is redacted, not just bare `key=v` / `key: v`. Without the `["']?` the closing
-    # quote in JSON sits between the key and `:` and defeats the match → secret leaks.
-    # The value class is [^\s"',}]+ (NOT \S+): \S+ is greedy and, in compact JSON
-    # like {"aws_secret_access_key":"SECRET","region":"x"}, swallows everything
-    # through the closing brace (`"`, `,`, `}` all match \S) — destroying adjacent
-    # fields and consuming a following credential key so it's never matched/counted.
-    # Stopping at JSON structural delimiters bounds the value while still matching
-    # bare key=value forms.
-    r'|(?:SecretAccessKey|aws_secret_access_key)["\']?\s*[:=]\s*["\']?[^\s"\',}]+'
-    r'|(?:SessionToken|aws_session_token)["\']?\s*[:=]\s*["\']?[^\s"\',}]+'
-    r'|(?:AccessKeyId|aws_access_key_id)["\']?\s*[:=]\s*["\']?[^\s"\',}]+'
+    # No branch for the access key ID (`AKIA…` / `ASIA…`), bare or labelled: it is
+    # Identifier tier (see `credential_patterns.RULE_TIERS`). It names a key and
+    # cannot sign a request, so it is never redacted.
+    #
+    # The labelled forms (the secret access key and session token behind their
+    # field names, and the ``Authorization`` header) are not branches here: they
+    # live in ``redaction_labels``, which replaces the value and keeps the label.
     # PEM private key: match the ENTIRE block (header + base64 body), not just
     # the header phrase. redact_credentials() replaces the matched SPAN, so a
     # header-only match (the original form) left the secret base64 body verbatim.
@@ -103,7 +97,7 @@ _CREDENTIAL_PATTERNS = re.compile(
     #      the full-block cap). Because the lookahead consumes nothing, TWO+
     #      consecutive blank lines still terminate the run — trailing prose is
     #      preserved (no over-redaction).
-    f"|{pem_scan.HEADER}"
+    f"{pem_scan.HEADER}"
     r"(?:"
     f"{pem_scan.FULL_BLOCK}"
     r"|(?:\r?\n(?:Proc-Type:[^\n]*|DEK-Info:[^\n]*|[A-Za-z0-9+/=]+(?=\r?\n|\Z)"
@@ -242,24 +236,22 @@ _CREDENTIAL_PATTERNS = re.compile(
     # (`alg:dir`) or key-agreement (`ECDH-ES`) key management has an empty Encrypted
     # Key (2nd) segment — shape `header..iv.ciphertext.tag` — which a `+` quantifier
     # would fail to match, leaking the ciphertext + tag.
-    # The HTTP `Authorization: Bearer <token>` header carries opaque or JWT bearer
-    # creds. The JWT alternative is case-sensitive (`eyJ` is a fixed base64url
-    # prefix). The header name + scheme are matched case-insensitively via scoped
-    # `(?i:…)` groups because HTTP header names are case-insensitive (RFC 7230
-    # §3.2), HTTP/2 mandates lowercase names, and the `Bearer` scheme is
-    # case-insensitive (RFC 6750 §2.1) — so `authorization: bearer …` emitted by
-    # requests / net/http / HTTP2 frame logs is redacted too. The separator is
-    # JSON-aware: an optional quote may precede the
-    # `:`/`=` and the token, so a serialized header `{"Authorization": "Bearer
-    # <tok>"}` in a structured-log/JSON request dump is redacted as well. Both
-    # alternatives are scoped tightly: the JWT segment class cannot cross the
-    # literal `.` separators and the Bearer token class (`[A-Za-z0-9._~+/-]`, RFC
-    # 6750 `b64token`) stops at whitespace/quotes, so neither over-captures. A
-    # Bearer header carrying a JWT redacts as one match (the Bearer class subsumes
-    # the JWT); a bare JWT is still caught independently (defense in depth).
+    # The JWT alternatives are case-sensitive (`eyJ` is a fixed base64url prefix).
+    # An `Authorization: Bearer <token>` header is a labelled value and lives in
+    # ``redaction_labels``; a bare JWT is still caught here on its own.
     f"|{JWT_MULTI_SEGMENT}"  # JWS (3-seg) / JWE (5-seg incl. dir/ECDH-ES), shared spelling
     r"|(?<![A-Za-z0-9_.-])eyJ[A-Za-z0-9_-]{96,}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])"  # 2-seg link token
-    r"|(?i:Authorization)[\"\']?\s*[:=]\s*[\"\']?(?i:Bearer)\s+[A-Za-z0-9._~+/-]+=*"  # HTTP/JSON bearer
+    # SigV4 / SigV4A request signature: the hex value after `Signature=`, as an
+    # `Authorization: AWS4-HMAC-SHA256 ...` (or `AWS4-ECDSA-P256-SHA256`) header
+    # writes it (a presigned query's `?`/`&Signature=` is handled by pass 4
+    # instead, which keeps the label and folds case and encodings). SigV4 is
+    # exactly 64 hex; SigV4A is a DER-encoded ECDSA signature, longer than 64 hex,
+    # so the run is open-ended above the floor and bounded by the non-hex
+    # look-ahead. With the key ID beside it visible, a logged request could be
+    # replayed until the signature expires, so the value goes. The look-behind
+    # keeps the label and folds case (HTTP/2 lowercases header names); the hex
+    # class takes either case.
+    r"|(?:(?<=Signature=)|(?<=signature=))[0-9a-fA-F]{64,}(?![0-9A-Za-z])"  # SigV4/SigV4A signature
     r")",
 )
 
@@ -270,10 +262,14 @@ def get_credential_patterns() -> list[re.Pattern[str]]:
     Lets other modules (e.g. deploy-web's pre-publish content scan) reuse the
     same patterns without coupling to the private ``_CREDENTIAL_PATTERNS`` name,
     so a future rename here can't silently turn a downstream scan into a no-op.
-    Returns a list so callers can iterate uniformly; the fork keeps a single
-    combined compiled regex, so the list has one element.
+    Returns a list so callers can iterate uniformly: the fixed-pattern
+    alternation, then the AWS secret-label and ``Authorization`` patterns from
+    ``redaction_labels`` (labelled values are not alternation branches, and a
+    scan that only searches must still find them).
     """
-    return [_CREDENTIAL_PATTERNS]
+    from .redaction_labels import fixed_label_patterns
+
+    return [_CREDENTIAL_PATTERNS, *fixed_label_patterns()]
 
 
 # The JWS/JWE branch is shape-only (it matches `honeyJar.example.com`), so its hits need a
@@ -460,16 +456,8 @@ def _contains_credential_pattern(text: str) -> bool:
 # count assertion loudly instead of quietly widening the leak.
 #
 # Literals are case-sensitive because the branches they stand for are (these
-# prefixes are issued in a fixed case); the sole case-insensitive branch
-# (`Authorization: Bearer`) is handled separately below.
+# prefixes are issued in a fixed case); no branch folds case.
 _CREDENTIAL_PREFILTER_LITERALS: tuple[str, ...] = (
-    "AKIA",  # AWS access key ID
-    "ASIA",  # AWS access key ID (STS)
-    "AccessKey",  # SecretAccessKey + AccessKeyId (shared substring)
-    "aws_secret_access_key",
-    "aws_session_token",
-    "aws_access_key_id",
-    "SessionToken",
     "PRIVATE KEY-----",  # PEM header AND footer both carry it
     "xox",  # Slack token
     "github_pat_",
@@ -484,6 +472,8 @@ _CREDENTIAL_PREFILTER_LITERALS: tuple[str, ...] = (
     "_v1_",  # do[opr]_v1_ DigitalOcean
     "GOCSPX-",  # Google OAuth client secret
     "eyJ",  # JWS / JWE / 2-segment link token
+    "Signature=",  # SigV4 request signature header (canonical case)
+    "signature=",  # SigV4 request signature header (HTTP/2-lowercased)
 )
 
 # Branches with no usable literal anchor. Each is the branch's own leading shape
@@ -519,31 +509,6 @@ _CREDENTIAL_PREFILTER_DISCORD_RE = re.compile(
 )
 _CREDENTIAL_PREFILTER_URI_RE = re.compile(r"://[^\s:/@]*:[^\s/]+@")
 
-# The `Authorization: Bearer` branch is the ONLY case-insensitive branch, and it is
-# spelled `(?i:Authorization)`. This anchor reuses that exact sub-pattern, so it is
-# a superset of the branch BY CONSTRUCTION — same engine, same folding rules.
-#
-# `"authorization" in text.lower()` is NOT a valid anchor for it, because
-# `str.lower()` and `re.IGNORECASE` are two DIFFERENT case-folding
-# implementations and they disagree. `re` folds via `sre_compile._equivalences`,
-# which treats U+0131 (LATIN SMALL LETTER DOTLESS I) and U+0130 (LATIN CAPITAL
-# LETTER I WITH DOT ABOVE) as equivalent to `i`/`I`; `str.lower()` leaves U+0131
-# unchanged and expands U+0130 to two code points. So the branch MATCHES
-# `Authorızation: Bearer <token>` while a `.lower()` anchor MISSES it, which skips
-# pass 1 and leaves the bearer token verbatim in persisted chat history. The same
-# disagreement holds for U+017F/`s` and U+212A/`k`, so it is a class of defect
-# rather than one homoglyph: a case-insensitive branch is only safely anchored by
-# the SAME regex engine, never by a hand-rolled fold.
-# Pinned by `test_unicode_case_folding_cannot_bypass_the_prefilter`.
-#
-# For speed the anchor is split on its `z`, the one letter `re.IGNORECASE` folds
-# onto nothing but `z` and `Z`: each half starts with that literal (searched at
-# memchr speed) and leaves every other letter to the same `(?i:…)` sub-pattern,
-# so the folding is still the engine's own. Together the two accept exactly what
-# `(?i:Authorization)` does.
-_CREDENTIAL_PREFILTER_AUTHORIZATION_RE = re.compile(r"z(?<=(?i:Authori)z)(?i:ation)")
-_CREDENTIAL_PREFILTER_AUTHORIZATION_UPPER_RE = re.compile(r"Z(?<=(?i:Authori)Z)(?i:ation)")
-
 
 def _might_contain_credential(text: str) -> bool:
     """Return True if *text* could contain a `_CREDENTIAL_PATTERNS` match.
@@ -561,8 +526,6 @@ def _might_contain_credential(text: str) -> bool:
         or _CREDENTIAL_PREFILTER_TELEGRAM_RE.search(text) is not None
         or _CREDENTIAL_PREFILTER_DISCORD_RE.search(text) is not None
         or _CREDENTIAL_PREFILTER_URI_RE.search(text) is not None
-        or _CREDENTIAL_PREFILTER_AUTHORIZATION_RE.search(text) is not None
-        or _CREDENTIAL_PREFILTER_AUTHORIZATION_UPPER_RE.search(text) is not None
     )
 
 

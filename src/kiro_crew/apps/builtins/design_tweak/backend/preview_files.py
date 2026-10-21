@@ -13,6 +13,7 @@ from typing import Any
 
 from kiro_crew.security import DENIED_ROOT_PARTS
 from kiro_crew.security.redaction import _credential_matches
+from kiro_crew.security.redaction_decode import _view_blocks, blocking_context
 
 Response = tuple[int, str, bytes]
 
@@ -457,7 +458,10 @@ def contains_credential(runtime: Any, data: bytes) -> bool:
             # material; require an armoured body before refusing that case.
             continue
         return True
-    return False
+    # The context rules of the Secret tier, on the text and on its normalised
+    # view (an escaped ``{\"SecretAccessKey\": ...}``): the same predicate
+    # the exfiltration checks block on, so the two cannot drift.
+    return blocking_context(text) or _view_blocks(text)
 
 
 def is_project_secret(runtime: Any, root: Any, target: Any) -> bool:
