@@ -114,6 +114,10 @@ class DashboardState:
     _folders_generation: int
     #: Set lazily by ``push_lineage_patch``: key -> (parent, lineage_pending).
     _lineage_sent: dict[str, tuple[Any, bool]]
+    #: Set lazily by ``push_subagent_patch``: key -> (subagents_running, subagents_queued).
+    _subagents_sent: dict[str, tuple[bool, int]]
+    #: Counts last broadcast to legacy consumers, set by ``_record_subagents_sent``.
+    _legacy_subagents_sent: dict[str, tuple[bool, int]]
 
     # Class-level defaults, NOT just __init__ assignments. push_slots_update and
     # _persist_open_slots read these on every call, and a partially-constructed
@@ -1146,6 +1150,7 @@ class DashboardState:
     push_slot_title = _slots_push.push_slot_title
     push_slot_patch = _slots_push.push_slot_patch
     push_lineage_patch = _slots_push.push_lineage_patch
+    push_subagent_patch = _slots_push.push_subagent_patch
     push_slot_removed = _slots_push.push_slot_removed
     _has_slot_patch_clients = _slots_push._has_slot_patch_clients
     _send_slot_patch = _slots_push._send_slot_patch
