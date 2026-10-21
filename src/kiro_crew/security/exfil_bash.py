@@ -77,6 +77,33 @@ _BASH_EXFIL_RES: list[tuple[re.Pattern[str], str]] = [
     # `-T`: curl's upload flag is uppercase, so this does NOT match lowercase long
     # options such as `--trace-time`. `-T` must begin at a word boundary.
     (re.compile(r"\bcurl\b.*(?:^|\s)-T\s*\S"), "curl -T upload"),
+    # /dev/tcp//dev/udp reverse shell spliced with a shell EXPANSION. The deny
+    # view stops before expansion, so the literal `/dev/tcp/` substring (matched
+    # by the `/dev/tcp/` pattern above) is absent while bash still forms the
+    # pseudo-device at run time: `/dev/tc$(printf p)/host/port`, `/dev/tc${X}p/…`,
+    # even `/dev/tcp$(printf /)…` (the trailing slash expanded). A benign
+    # `/dev/null`, `/dev/stdin` or `/dev/fd/N` never splices one into the device
+    # name, and a quote-only split (`/dev/tc"p"/`) carries no substitution so it
+    # stays the deny tier's job. Only the unexpanded command text is matched -- no
+    # expanded bytes are logged.
+    #
+    # Two anchors keep this to the real pseudo-device and off ordinary paths:
+    #   1. ABSOLUTE position. bash's magic fires only for a leading `/dev/tcp`, so
+    #      `/dev/` must BEGIN a shell word: start of command, or right after
+    #      whitespace or a `> < & | ; (` operator. A `/dev/tc` substring inside a
+    #      home, relative or drive-rooted path -- `~/dev/tcl${V}`, `./dev/tc${x}`,
+    #      `$(pwd)/dev/udp-tools${V}`, `${WORKSPACE}/dev/tcl${V}`, `C:/dev/tcl${V}`,
+    #      `build//dev/tcl$((8+1))` -- is preceded by `~ . / } ) " :` and the like,
+    #      none of which open a word, so it does not match.
+    #   2. DEVICE name. The segment after `/dev/` must be exactly `tcp`/`udp` with
+    #      the expansion forming part of it: `tc`/`ud`/`tcp`/`udp` IMMEDIATELY
+    #      followed by a `$(`/`${`. A longer literal device -- `/dev/tcl…`,
+    #      `/dev/tcpdump…`, `/dev/udemy…`, `/dev/udmabuf…` -- has a literal letter
+    #      between the prefix and any expansion, so it does not match.
+    (
+        re.compile(r"(?:^|(?<=[\s>&<|;(]))/dev/(?:tcp?|udp?)(?:\$\(|\$\{)"),
+        "/dev/tcp via shell expansion",
+    ),
 ]
 
 
@@ -110,6 +137,7 @@ _BASH_EXFIL_RULE_BY_LABEL: dict[str, tuple[str, ...]] = {
     "nc/ncat file redirect": ("data-exfil-nc-file-redirect",),
     "nc/ncat reverse shell": ("reverse-shell-nc", "reverse-shell-ncat"),
     "curl -T upload": ("data-exfil-curl-upload",),
+    "/dev/tcp via shell expansion": ("reverse-shell-devtcp",),
 }
 
 #: For a label whose regex spans several catalog rows, the token that identifies
