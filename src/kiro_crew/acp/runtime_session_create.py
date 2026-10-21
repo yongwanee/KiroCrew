@@ -345,6 +345,11 @@ async def create_session(
         mcp_servers=wire_servers,
         kas_custom_agents=kas_agents,
     )
+    # The host's last word on the request and on the agent it activates
+    # (harness-parity H13): every served host returns both unchanged.
+    params, agent = self._harness.session_request(
+        METHOD_SESSION_NEW, params, agent, agent_capabilities=self._agent_capabilities
+    )
 
     projected_sources: dict[str, str] = {}
     if self._member_context:
@@ -620,6 +625,8 @@ async def _teardown_late_session(self: AcpRuntime, session_id: str) -> None:
     """
     if self._dead or self._process is None:
         return
+    # A late ``session/new`` answer nobody adopted: nothing records the id.
+    self._unclaimed_new_sessions.add(session_id)
     await self.terminate_session(session_id)
 
 
@@ -667,6 +674,9 @@ async def _finish_create_session(
     self._session_cwds[session_id] = str(session_work_dir)
     for msg in buffered_init:
         queue.put_nowait(msg)
+    # Unclaimed until the handle is returned: every refusal arm below tears
+    # the session down, and with no handle out nothing could reopen it.
+    self._unclaimed_new_sessions.add(session_id)
 
     # Resolve the watchdog snapshot OFF the loop before constructing the
     # handle: the load is config file reads + jsonschema validation on a
@@ -894,6 +904,7 @@ async def _finish_create_session(
         await self.terminate_session(session_id)
         raise
 
+    self._unclaimed_new_sessions.discard(session_id)
     logger.info("Created session %s on runtime PID %d", session_id, self._pid or 0)
     return handle
 
@@ -1013,7 +1024,9 @@ async def probe_advertised_models(
         finally:
             if session_id:
                 # Evict the probe session from the shared process; never
-                # raises (best-effort by contract).
+                # raises (best-effort by contract). Nothing records the probe's
+                # id, so it is freed on the backend even where teardown is local.
+                self._unclaimed_new_sessions.add(session_id)
                 await self.terminate_session(session_id)
         # A non-empty answer updates the stored result and its OWN clock, so
         # it is replayed until that clock expires. An empty answer leaves the

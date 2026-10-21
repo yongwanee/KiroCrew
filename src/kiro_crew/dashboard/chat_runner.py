@@ -506,6 +506,7 @@ from kiro_crew.dashboard.chat_turn.turn_spec_hooks import (
     _fire,
     _prepare_spec_hooks,
     _surface_agent_welcome,
+    _surface_startup_notice,
 )
 from kiro_crew.dashboard.chat_turn.turn_stats import (  # noqa: F401
     _MAX_MODEL_ID_LEN,

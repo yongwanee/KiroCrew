@@ -70,6 +70,7 @@ async def _client(tmp_path, monkeypatch, *, owner=True):
     app.router.add_get("/s/{slot}", handlers.api_chat_slot_environment_get)
     app.router.add_put("/s/{slot}", handlers.api_chat_slot_environment_put)
     app.router.add_get("/b/{slot}", handlers.api_chat_slot_environment_browse)
+    app.router.add_get("/h/{slot}", handlers.api_chat_slot_environment_health)
     app.router.add_put("/w/{slot}", handlers.api_chat_slot_environment_file_put)
     app.router.add_post("/check", handlers.api_session_environments_check)
     app.router.add_get("/ws", handlers.api_session_environments_workspaces_get)
@@ -624,3 +625,18 @@ async def test_terminal_socket_refuses_a_local_shell_for_a_remote_chat(tmp_path,
         assert "abc123" not in app["state"]._terminal_sessions
     finally:
         await client.close()
+
+
+@sync
+async def test_health_of_a_cloud_sandbox_is_a_409_not_a_failure(tmp_path, monkeypatch):
+    """Only a Kiro Cloud sandbox's own agent reaches it, so a health read is answered
+    with ``cloud_sandbox`` (the browse routes' code), never the 502 of a broken read."""
+    async with _client(tmp_path, monkeypatch) as client:
+
+        async def cloud(_key):
+            raise session_browse.CloudSandboxOnly("runs in a Kiro cloud sandbox")
+
+        monkeypatch.setattr(session_browse, "session_health", cloud)
+        resp = await client.get("/h/main")
+        assert resp.status == 409
+        assert (await resp.json())["code"] == "cloud_sandbox"

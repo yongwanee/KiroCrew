@@ -8,6 +8,7 @@ import type { ReactNode } from 'react'
 
 import { api, type SessionEnvironmentsCheck } from '../../api/client'
 import { AGENT_SANDBOX_PATH } from '../overview/agentSandboxLink'
+import { ACP_BACKEND_KAS, acpBackendName } from '../../api/acpBackend'
 import { fmtDateTime } from '../../i18n/format'
 import { useAppDispatch } from '../../store'
 import { resumeFromHistory } from '../../store/chatSlice'
@@ -15,6 +16,7 @@ import { reportForError } from '../../utils/errorReport'
 import { safeHttpUrl } from '../../lib/safeUrl'
 import Clickable from '../../components/Clickable'
 import ErrorNotice from '../../components/ErrorNotice'
+import StatusNotice from '../../components/StatusNotice'
 import { SettingsCombobox, SettingsField, SettingsInput, SettingsSelect, SettingsToggle } from '../../components/settings'
 import { Btn, PanelSectionHeader } from '../../components/ui'
 
@@ -27,12 +29,22 @@ interface EnvironmentProfile {
    * the card writes it only once toggled, so an older gateway never sees it. */
   compute_survives_stop?: boolean
 }
+/** A Kiro Cloud Sessions profile: the repositories its cloud sandbox opens. */
+interface KiroCloudProfile {
+  id: string
+  name: string
+  repositories: string[]
+}
+/** Mirrors KIRO_CLOUD_REPOSITORIES_MAX in config/session_environments.py. */
+const KIRO_CLOUD_REPOSITORIES_MAX = 10
 /** How often the card re-reads the workspace list. */
 const WORKSPACES_POLL_MS = 15_000
 type ProfileTextKey = 'id' | 'name' | 'template' | 'workdir'
 interface EnvironmentSettings {
   coder_url: string
   profiles: EnvironmentProfile[]
+  /** Kiro Cloud Sessions profiles. Older gateways omit it. */
+  kiro_cloud_profiles?: KiroCloudProfile[]
   /** Profile id new chats start on; "" is this machine. Older gateways omit it. */
   default_profile?: string
   /** Stop every remote environment when the gateway shuts down. Older gateways omit it. */
@@ -44,6 +56,15 @@ interface EnvironmentSettings {
 function withoutDefault(next: EnvironmentSettings, removedId: string): EnvironmentSettings {
   if (next.default_profile !== removedId) return next
   return { ...next, default_profile: next.profiles.find(p => p.id)?.id ?? '' }
+}
+/** The repositories field is edited as one comma-separated line; blanks left by
+ * a trailing comma are dropped only when saving, so typing is not fought. */
+function withCleanRepositories(next: EnvironmentSettings): EnvironmentSettings {
+  if (!next.kiro_cloud_profiles) return next
+  return {
+    ...next,
+    kiro_cloud_profiles: next.kiro_cloud_profiles.map(p => ({ ...p, repositories: p.repositories.filter(r => r) })),
+  }
 }
 interface ConfigResponse {
   session_environments?: EnvironmentSettings
@@ -353,6 +374,7 @@ export function SessionEnvironmentsCard() {
     return next
   })
   const removeRow = (index: number) => setOpenRows(rows => rows.filter((_, i) => i !== index))
+  const [openCloudRows, setOpenCloudRows] = useState<boolean[]>([])
   const mutation = useMutation({
     mutationFn: (value: EnvironmentSettings) => api.patchConfig('session_environments', value) as Promise<ConfigResponse>,
     onMutate: () => qc.cancelQueries({ queryKey: ['kirocrewConfig'] }),
@@ -452,6 +474,27 @@ export function SessionEnvironmentsCard() {
       profiles: config.profiles.map((profile, i) => i === index ? { ...profile, [field]: value } : profile),
     })
   }
+  const cloudProfiles = config.kiro_cloud_profiles
+  // Per-record rows, like the Coder ones: not indexed as settings of their own.
+  const cloudFields: { key: keyof KiroCloudProfile; label: string; description?: string }[] = [
+    { key: 'id', label: t('sessionEnvironments.id') },
+    { key: 'name', label: t('sessionEnvironments.name') },
+    {
+      key: 'repositories',
+      label: t('sessionEnvironments.kiroCloud.repositories'),
+      description: t('sessionEnvironments.kiroCloud.repositoriesHint', { max: KIRO_CLOUD_REPOSITORIES_MAX }),
+    },
+  ]
+  const updateCloud = (index: number, patch: Partial<KiroCloudProfile>) => {
+    change({ ...config, kiro_cloud_profiles: (cloudProfiles ?? []).map((p, i) => i === index ? { ...p, ...patch } : p) })
+  }
+  const addCloudProfile = () => {
+    const taken = new Set([...config.profiles, ...(cloudProfiles ?? [])].map(p => p.id))
+    let n = 1
+    while (taken.has(`kiro-cloud-${n}`)) n++
+    setOpenCloudRows(rows => { const next = [...rows]; next[(cloudProfiles ?? []).length] = true; return next })
+    change({ ...config, kiro_cloud_profiles: [...(cloudProfiles ?? []), { id: `kiro-cloud-${n}`, name: '', repositories: [] }] })
+  }
   const addProfile = () => {
     let n = 1
     while (config.profiles.some(profile => profile.id === `profile-${n}`)) n++
@@ -462,7 +505,7 @@ export function SessionEnvironmentsCard() {
   return (
     <form className="min-w-0 space-y-3 pt-3" onSubmit={event => {
       event.preventDefault()
-      if (draft && !mutation.isPending) mutation.mutate(draft)
+      if (draft && !mutation.isPending) mutation.mutate(withCleanRepositories(draft))
     }}>
       {/* The two words the page uses, defined once where the reader starts. */}
       <p className="text-[13px] text-muted">{t('sessionEnvironments.intro')}</p>
@@ -574,7 +617,7 @@ export function SessionEnvironmentsCard() {
         * steps, which a first setup walks in order. Older gateways omit
         * either key, and then its control stays hidden. */}
       {(config.default_profile !== undefined || config.stop_on_shutdown !== undefined) && (() => {
-        const all = config.profiles.filter(p => p.id)
+        const all = [...config.profiles, ...(config.kiro_cloud_profiles ?? [])].filter(p => p.id)
         const defaultOn = !!config.default_profile
         return (
           <section aria-label={t('sessionEnvironments.globalDefaults')} className="space-y-3 pt-3">
@@ -612,6 +655,52 @@ export function SessionEnvironmentsCard() {
           </section>
         )
       })()}
+      {/* Its own section, outside Coder's numbered steps: none of them applies. */}
+      {cloudProfiles !== undefined && (
+        <section aria-label={t('sessionEnvironments.kiroCloud.title')} className="space-y-3 pt-3">
+          <PanelSectionHeader label={t('sessionEnvironments.kiroCloud.title')} />
+          {/* What opting in gives up, as a warning in plain view rather than folded away. */}
+          <StatusNotice tone="warn" message={t('sessionEnvironments.kiroCloud.limits')} />
+          <details className="rounded-lg border border-border p-3">
+            <summary className="cursor-pointer text-[13px] font-semibold text-text">{t('sessionEnvironments.kiroCloud.setup')}</summary>
+            <ol className="list-decimal pl-5 space-y-2 pt-3 text-[13px] text-muted">
+              {/* The backend by the label its picker shows, so the step matches the screen. */}
+              <li>{t('sessionEnvironments.kiroCloud.setup1', { tab: t('settings.tabs.agent.label'), backend: acpBackendName({ id: ACP_BACKEND_KAS }) })}</li>
+              <li>{t('sessionEnvironments.kiroCloud.setup2')}</li>
+            </ol>
+          </details>
+          <fieldset disabled={mutation.isPending} className="min-w-0 space-y-3">
+            <SettingsField configKey="session_environments.kiro_cloud_profiles" label={t('sessionEnvironments.kiroCloud.profiles')}
+              description={t('sessionEnvironments.kiroCloud.profilesHint')}>
+              <div className="min-w-0 space-y-3">
+                {/* The readiness check above probes Coder and git hosts only. */}
+                <p className="text-[12px] text-muted">{t('sessionEnvironments.kiroCloud.notVerified')}</p>
+                {cloudProfiles.map((profile, index) => (
+                  <ProfileDisclosure key={index} title={profile.name || profile.id} subtitle={profile.repositories.filter(r => r).join(', ')}
+                    open={!!openCloudRows[index]} onToggle={() => setOpenCloudRows(rows => { const next = [...rows]; next[index] = !next[index]; return next })}>
+                    {cloudFields.map(field => (
+                      <SettingsInput key={field.key} label={field.label} description={field.description}
+                        value={field.key === 'repositories' ? profile.repositories.join(', ') : profile[field.key]}
+                        onChange={value => updateCloud(index, field.key === 'repositories'
+                          ? { repositories: value.split(',').map(r => r.trim()) }
+                          : { [field.key]: value })} />
+                    ))}
+                    <Btn type="button" onClick={() => {
+                      setOpenCloudRows(rows => rows.filter((_, i) => i !== index))
+                      change(withoutDefault({ ...config, kiro_cloud_profiles: cloudProfiles.filter((_, i) => i !== index) }, profile.id))
+                    }}>
+                      <Trash2 size={14} aria-hidden="true" />{t('sessionEnvironments.kiroCloud.remove')}
+                    </Btn>
+                  </ProfileDisclosure>
+                ))}
+                <Btn type="button" disabled={cloudProfiles.length >= 20} onClick={addCloudProfile}>
+                  <Plus size={14} aria-hidden="true" />{t('sessionEnvironments.kiroCloud.add')}
+                </Btn>
+              </div>
+            </SettingsField>
+          </fieldset>
+        </section>
+      )}
       {/* Last, after the defaults, and stuck to the bottom of the panel while
         * there are unsaved edits, so Save stays in view from every section. */}
       <div data-testid="session-environments-save-bar"
@@ -622,6 +711,7 @@ export function SessionEnvironmentsCard() {
           setSaved(false)
           setRemoved(false)
           setOpenRows([])
+          setOpenCloudRows([])
           mutation.reset()
         }}>{t('sessionEnvironments.discard')}</Btn>
         {(saved || (removed && draft)) && <span role="status" className="text-[13px] text-muted">

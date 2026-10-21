@@ -21,6 +21,7 @@ from kiro_crew.metrics.sessions import (
     END_REASON_SHUTDOWN,
     record_sessions_ended,
 )
+from kiro_crew.providers.base import LLMProvider
 from kiro_crew.session_pool import pool_kiro_agent
 
 if TYPE_CHECKING:
@@ -185,7 +186,10 @@ async def drain_active_turns(self: SessionLifecycleService, timeout: float | Non
     # Already-cancelled turns can report inactive before the native done ack;
     # unfinished is the signal that the native lock may still be held.
     unfinished = [
-        provider for provider in providers if self._deps.provider_has_unfinished_turn(provider)
+        provider
+        for provider in providers
+        if self._deps.provider_has_unfinished_turn(provider)
+        and not (isinstance(provider, LLMProvider) and provider.turn_survives_disconnect)
     ]
     if not unfinished:
         return 0

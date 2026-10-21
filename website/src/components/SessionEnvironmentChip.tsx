@@ -123,7 +123,7 @@ export default function SessionEnvironmentChip({ slot, disabled, compact }: Prop
       // would land the old choice over this one: cancel it, publish, re-read.
       await queryClient.cancelQueries({ queryKey: key })
       queryClient.setQueryData<SlotEnvironment>(key, (old) =>
-        old ? { ...old, profile: result.profile } : old,
+        old ? { ...old, profile: result.profile, provider: result.profile ? old.profiles.find(p => p.id === result.profile)?.provider : null } : old,
       )
       void queryClient.invalidateQueries({ queryKey: key })
     },
@@ -201,7 +201,10 @@ export default function SessionEnvironmentChip({ slot, disabled, compact }: Prop
   )
   const announce = <span className="sr-only" role="status" aria-live="polite">{stageLabel}</span>
 
-  if (locked && !remote) {
+  // A Kiro Cloud sandbox has no machine metrics Kiro Crew can read (only its own
+  // agent reaches it), so its fixed chip is the plain status, with no health card.
+  const cloudSandbox = (data.provider ?? profile?.provider) === 'kiro_cloud'
+  if (locked && (!remote || cloudSandbox)) {
     // A muted status with a lock, so it does not read as the picker.
     return (
       <div className="flex items-center min-w-0 shrink-0 pr-2 border-r border-border">
@@ -275,8 +278,11 @@ export default function SessionEnvironmentChip({ slot, disabled, compact }: Prop
                 <ProviderGlyph provider={p.provider} size={14} />
                 <span className="flex flex-col min-w-0 flex-1">
                   <span className="truncate">{p.name}</span>
-                  {/* Profiles often share a folder; the template tells them apart. */}
-                  <span className="truncate text-[12px] text-muted font-mono">{p.template || p.workdir}</span>
+                  {/* Profiles often share a folder; the template tells them apart. A Kiro
+                      Cloud profile has no directory Kiro Crew can see. */}
+                  <span className="truncate text-[12px] text-muted font-mono">
+                    {p.template || p.workdir || p.repositories?.join(', ') || t('sessionEnvironments.kiroCloud.emptyWorkspace')}
+                  </span>
                 </span>
                 {mark(p.id)}
               </DropdownMenuRadioItem>
