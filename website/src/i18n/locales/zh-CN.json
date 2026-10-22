@@ -6353,7 +6353,10 @@
     },
     "codeBlock": {
       "add_comment": "添加评论",
+      "comment_on_lines": "评论第 {{start}}–{{end}} 行",
       "comment_thread": "评论会话（{{count}}）",
+      "comment_thread_selected": "评论会话（{{count}}，已选中）",
+      "comment_thread_unread": "评论会话（{{count}}，未读）",
       "copied": "已复制！",
       "copy": "复制",
       "generating": "生成中…"

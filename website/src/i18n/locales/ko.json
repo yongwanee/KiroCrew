@@ -6353,7 +6353,10 @@
     },
     "codeBlock": {
       "add_comment": "댓글 추가",
+      "comment_on_lines": "{{start}}–{{end}}번 줄에 댓글 달기",
       "comment_thread": "댓글 스레드 ({{count}})",
+      "comment_thread_selected": "댓글 스레드 ({{count}}, 선택됨)",
+      "comment_thread_unread": "댓글 스레드 ({{count}}, 읽지 않음)",
       "copied": "복사했습니다!",
       "copy": "복사",
       "generating": "생성 중…"

@@ -6353,7 +6353,10 @@
     },
     "codeBlock": {
       "add_comment": "コメントを追加",
+      "comment_on_lines": "{{start}}–{{end}} 行目にコメント",
       "comment_thread": "コメントスレッド（{{count}}）",
+      "comment_thread_selected": "コメントスレッド（{{count}}、選択中）",
+      "comment_thread_unread": "コメントスレッド（{{count}}、未読）",
       "copied": "コピーしました！",
       "copy": "コピー",
       "generating": "生成中…"

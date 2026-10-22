@@ -6465,7 +6465,10 @@
     },
     "codeBlock": {
       "add_comment": "মন্তব্য যোগ করো",
+      "comment_on_lines": "{{start}}–{{end}} লাইনে মন্তব্য করো",
       "comment_thread": "মন্তব্যের থ্রেড ({{count}})",
+      "comment_thread_selected": "মন্তব্যের থ্রেড ({{count}}, নির্বাচিত)",
+      "comment_thread_unread": "মন্তব্যের থ্রেড ({{count}}, অপঠিত)",
       "copied": "কপি হয়েছে!",
       "copy": "কপি",
       "generating": "তৈরি হচ্ছে…"

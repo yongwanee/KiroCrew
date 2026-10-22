@@ -6465,7 +6465,10 @@
     },
     "codeBlock": {
       "add_comment": "Kommentar hinzufügen",
+      "comment_on_lines": "Zeilen {{start}}–{{end}} kommentieren",
       "comment_thread": "Kommentar-Thread ({{count}})",
+      "comment_thread_selected": "Kommentar-Thread ({{count}}, ausgewählt)",
+      "comment_thread_unread": "Kommentar-Thread ({{count}}, ungelesen)",
       "copied": "Kopiert!",
       "copy": "Kopieren",
       "generating": "wird erstellt…"

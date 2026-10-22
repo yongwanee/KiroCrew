@@ -6465,7 +6465,10 @@
     },
     "codeBlock": {
       "add_comment": "टिप्पणी जोड़ें",
+      "comment_on_lines": "पंक्तियों {{start}}–{{end}} पर टिप्पणी करो",
       "comment_thread": "टिप्पणी थ्रेड ({{count}})",
+      "comment_thread_selected": "टिप्पणी थ्रेड ({{count}}, चुना हुआ)",
+      "comment_thread_unread": "टिप्पणी थ्रेड ({{count}}, अपठित)",
       "copied": "कॉपी हो गया!",
       "copy": "कॉपी करें",
       "generating": "जेनरेट हो रहा है…"

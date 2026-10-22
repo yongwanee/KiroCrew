@@ -2179,7 +2179,10 @@
     },
     "codeBlock": {
       "add_comment": "Add comment",
+      "comment_on_lines": "Comment on lines {{start}}–{{end}}",
       "comment_thread": "Comment thread ({{count}})",
+      "comment_thread_selected": "Comment thread ({{count}}, selected)",
+      "comment_thread_unread": "Comment thread ({{count}}, unread)",
       "copied": "Copied!",
       "copy": "Copy"
     },

@@ -6689,7 +6689,10 @@
     },
     "codeBlock": {
       "add_comment": "Добавить комментарий",
+      "comment_on_lines": "Прокомментировать строки {{start}}–{{end}}",
       "comment_thread": "Ветка комментариев ({{count}})",
+      "comment_thread_selected": "Ветка комментариев ({{count}}, выбрана)",
+      "comment_thread_unread": "Ветка комментариев ({{count}}, не прочитана)",
       "copied": "Скопировано!",
       "copy": "Копировать",
       "generating": "генерация…"

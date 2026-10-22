@@ -6577,7 +6577,10 @@
     },
     "codeBlock": {
       "add_comment": "Añadir comentario",
+      "comment_on_lines": "Comentar las líneas {{start}}–{{end}}",
       "comment_thread": "Hilo de comentarios ({{count}})",
+      "comment_thread_selected": "Hilo de comentarios ({{count}}, seleccionado)",
+      "comment_thread_unread": "Hilo de comentarios ({{count}}, sin leer)",
       "copied": "¡Copiado!",
       "copy": "Copiar",
       "generating": "generando…"
