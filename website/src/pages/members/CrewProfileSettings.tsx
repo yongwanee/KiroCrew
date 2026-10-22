@@ -69,7 +69,8 @@ export default function CrewProfileSettings({ member, slotKey, waiting = false }
   const mode = value('approval_mode')
   // What each mode lets the crewmate do, under the picker: the bare word
   // "Trust" alone does not say it.
-  // Scoped to the crewmate, not one chat: the profile pick covers every thread.
+  // Scoped to the crewmate, not one chat: the profile pick covers every thread
+  // and every worker session it opens (`dashboard/crewmate_approval.py`).
   const name = crewDisplayName(member)
   const modeHint = mode === 'normal'
     ? t('pages.membersPage.profile_mode_normal_hint', { name })

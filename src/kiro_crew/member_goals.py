@@ -95,6 +95,10 @@ KR_READING_MAX_CHARS = 120
 #: One saved weekly or monthly report: its title and its Markdown body.
 REPORT_TITLE_MAX_CHARS = 200
 REPORT_MAX_CHARS = 40_000
+#: The crewmate's notes (``save_notes``): what its briefing injects, which is
+#: ``members.MEMBER_BRIEFING_MAX_CHARS`` (spelled here because this module
+#: imports no ``members``; a test pins the two equal).
+NOTES_MAX_CHARS = 4000
 #: The record file itself, as read back: a hand-edited file past this is
 #: unreadable rather than loaded whole.
 _RECORD_MAX_BYTES = 64 * 1024

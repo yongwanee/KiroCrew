@@ -470,8 +470,10 @@ def rebind_cron_session_template(
     that differs from the capture in its template alone -- same member, store,
     mode, app and selection -- is this schedule's own, left by a run under the
     template the capture named before (a startup upgrade, or an agent change
-    through ``cron update``). It is rewritten under a compare-and-set against
-    the value just read. Any other record is left as it is and logged, and
+    through ``cron update``). So is a crewmate's record from before its turns ran
+    on its worker (``mate_worker.cron_worker_execution``), which differs in its
+    selection too, the member, store, mode and app the same. Either is rewritten
+    under a compare-and-set against the value just read. Any other record is left as it is and logged, and
     dispatch refuses it with its own reason. Not vouched: a cron key is never
     the caller slot of an own-store admission.
     """
@@ -491,7 +493,20 @@ def rebind_cron_session_template(
         return
     if current is None or current == execution:
         return
-    if replace(current, template_id=execution.template_id) != execution:
+    from kiro_crew.mate_worker import is_own_worker_execution
+
+    if is_own_worker_execution(execution) and current.member_id == execution.member_id:
+        # A crewmate's turn moving onto its worker (``cron_worker_execution``)
+        # changes the selection too: compare everything else.
+        current_as_worker = replace(
+            current,
+            selection_kind=execution.selection_kind,
+            selection_name=execution.selection_name,
+            template_id=execution.template_id,
+        )
+    else:
+        current_as_worker = replace(current, template_id=execution.template_id)
+    if current_as_worker != execution:
         logger.warning(
             "Cron '%s': its session record belongs to another execution and was left as it "
             "is; archive that session or recreate the schedule",

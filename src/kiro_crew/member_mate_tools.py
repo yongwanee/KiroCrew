@@ -6,13 +6,13 @@ Two questions about that one server, answered in one place:
   crewmate's sessions load the server, so the text Crew writes for it (its
   identity, its first welcome, the goal nudges) names the tools only when they
   are there, and points the user at the Goals tab when they are not.
-* :func:`grant_mate_tools_to_new_member` -- at creation only, a crewmate whose
-  template does not carry the server is enrolled through the capability editor
-  (:class:`kiro_crew.agent_capabilities.CapabilityService`), the same preview and
-  save the owner's Capabilities pane runs. The enrollment sets the server, its
-  ``tools`` reference and :data:`kiro_crew.agent._MATE_AUTO_GRANTS` on the
-  member's private copy and leaves every other row inheriting, so the copy keeps
-  following its template. An existing crewmate is never touched.
+* :func:`grant_mate_tools_to_new_member` -- the creation-time outcome for the
+  server. A crewmate on its own file gets ``kirocrew-mate`` from the gateway
+  (its conductor and its worker base both declare it), so the grant writes
+  nothing to that file and answers ``platform_provided``. A platform server is
+  never written into a crewmate's file by creation; an entry that names one
+  with no transport is dropped wherever the file is written or read
+  (:func:`kiro_crew.mate_worker.drop_partial_platform_servers`).
 
 Blocking IO throughout; callers run it off the event loop.
 
@@ -25,6 +25,7 @@ crewmate on a no-write template (the conductors) to keep a file it cannot write.
 from __future__ import annotations
 
 import fnmatch
+import json
 import logging
 import re
 from pathlib import Path
@@ -44,7 +45,7 @@ _MATE_REF = f"@{MATE_SERVER}"
 # A spec file stem: no separator, no leading dot, so it cannot leave its directory.
 _SAFE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 
-# Outcomes of :func:`grant_mate_tools_to_new_member`; only GRANTED wrote anything.
+# Outcomes of :func:`grant_mate_tools_to_new_member`; none of them writes anything.
 GRANTED = "granted"
 TEMPLATE_HAS_IT = "template_has_it"
 TEMPLATE_MUTES_IT = "template_mutes_it"
@@ -54,7 +55,18 @@ ALREADY_ENROLLED = "already_enrolled"
 POLICY_WITHHOLDS = "policy_withholds"
 SERVER_UNAVAILABLE = "server_unavailable"
 BACKEND_UNSUPPORTED = "backend_unsupported"
+MATE_FILE_MISSING = "mate_file_missing"
+PLATFORM_PROVIDED = "platform_provided"
 FAILED = "failed"
+
+
+def _digest(value: Any) -> str:
+    """Stable digest of a spec, to tell a no-op edit from a real one."""
+    import hashlib
+
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
 
 
 def _referenced(tools: Any) -> bool:
@@ -290,22 +302,11 @@ def grant_mate_tools_to_new_member(
     *,
     catalog: Callable[[str], dict[str, str]] | None = None,
 ) -> str:
-    """Give the just-created crewmate *member* the mate tools its template lacks.
+    """The mate-tools outcome for the just-created crewmate *member*. Never raises.
 
-    Call it once, right after the create published the member, and only then:
-    an existing crewmate is never enrolled by this. Returns one of the module's
-    outcome codes and never raises, because a create that landed must not be
-    reported as failed over a missing optional tool set. Skipped (nothing
-    written) when:
-
-    * the template already mounts the server, or mutes it (the template's
-      author decided);
-    * the template is the default spec ``kirocrew``, which receives the mate set
-      from Crew itself and keeps a removal the user made there;
-    * POLICY ∩ PROFILE withholds the server, or a fresh build would not emit it;
-    * a backend the member's chats start on cannot load an enrolled member's
-      saved spec (``agent_capabilities.member_backend_warning`` on the previewed
-      copy), since enrolling would then refuse every chat start.
+    ``platform_provided`` for a crewmate on its own file: the gateway supplies
+    the server, so nothing is written. ``mate_file_missing`` when the eager copy
+    did not land, ``default_template`` and ``not_a_member`` as named.
     """
     try:
         return _grant(member, catalog or _default_catalog)
@@ -315,9 +316,14 @@ def grant_mate_tools_to_new_member(
 
 
 def _grant(member: str, catalog: Callable[[str], dict[str, str]]) -> str:
-    from kiro_crew.agent_capabilities import CapabilityError, CapabilityService
+    """The outcome for crewmate *member*; writes nothing to its own file.
+
+    ``catalog`` is unused: a crewmate on its own file gets ``kirocrew-mate`` from
+    the gateway, so nothing is enrolled.
+    """
     from kiro_crew.agent_files import AGENT_FILENAME
     from kiro_crew.config.loader import KiroCrewConfig, _invalidate_config_cache
+    from kiro_crew.mate_config import has_mate_config
 
     _invalidate_config_cache()
     binding = KiroCrewConfig.load().agents.get(member)
@@ -325,43 +331,14 @@ def _grant(member: str, catalog: Callable[[str], dict[str, str]]) -> str:
         return NOT_A_MEMBER
     if binding.kiro_agent == Path(AGENT_FILENAME).stem:
         return DEFAULT_TEMPLATE
-    service = CapabilityService(catalog)
-    try:
-        view = service.get(member)
-    except CapabilityError as exc:
-        logger.info("mate tools not added to %r: %s", member, exc.code)
-        return f"refused:{exc.code}"
-    if view.get("mode") != "shared":
-        return ALREADY_ENROLLED
-    ops = _operations(view)
-    if isinstance(ops, str):
-        return ops
-    if not _policy_permits(member):
-        return POLICY_WITHHOLDS
-    if any(op["section"] == "mcpServers" for op in ops):
-        from kiro_crew.agent_capabilities import _member_platform_transport
-
-        if _member_platform_transport(MATE_SERVER) is None:
-            return SERVER_UNAVAILABLE
-    body = {"revision": view["revision"], "enroll": True, "operations": ops}
-    try:
-        preview = service.preview(member, body)
-        if preview.get("backend_warning"):
-            return BACKEND_UNSUPPORTED
-        service.put(member, {**body, "preview_token": preview["preview_token"]})
-    except CapabilityError as exc:
-        logger.info("mate tools not added to %r: %s", member, exc.code)
-        return f"refused:{exc.code}"
-    try:
-        from kiro_crew.sel import sel
-
-        sel().log_api_access(
-            caller="system",
-            operation="member_capabilities.mate_tools_granted",
-            outcome="success",
-            source="agent_create",
-            resources=member,
-        )
-    except Exception:
-        logger.debug("SEL audit unavailable for the mate grant", exc_info=True)
-    return GRANTED
+    # The eager copy must have run first and repointed the binding at the mate
+    # id. If it did not (its best-effort copy failed), there is no owned file to
+    # edit; leave the shared pointer as-is rather than minting one here.
+    if binding.kiro_agent != member or not has_mate_config(member):
+        return MATE_FILE_MISSING
+    # A crewmate on its own file chats on the conductor, which the gateway
+    # builds with ``kirocrew-mate`` whatever the template carried, and its file
+    # only extends the worker, whose base declares the server and always wins.
+    # So nothing is written: an entry here could only be an override with no
+    # transport, which a session that ran the file would wait on and never start.
+    return PLATFORM_PROVIDED
