@@ -1087,6 +1087,13 @@ is byte-identical) with no `CONTRACT_VERSION` bump.
   winner's identity. Merged at the
   consumption sites, never inside `KiroCrewConfig`, so a config save can never
   persist an edition default into the operator's file. Default `[]`.
+- `AppsLoader.default_installed_apps() -> List[Dict]` — registry apps the edition
+  installs and trusts once, as `{name, registry}` rows naming no repository. Read
+  by `apps/default_installs.py::reconcile_default_installs`, kicked as a tracked
+  background task after the dashboard listener serves
+  (`dashboard/server_runtime/app_platform.py::_kick_default_app_installs`). The
+  full contract is in [app-kit-platform](app-kit-platform.md), "Edition default
+  installs". Default `[]`.
 - `TelemetryProvider.otlp_destinations(cfg) -> Sequence[OtlpDestination]` — the
   OTLP collectors this edition sends telemetry to. Read by
   `metrics/provider.py::_otlp_destinations` once per recorder build (through

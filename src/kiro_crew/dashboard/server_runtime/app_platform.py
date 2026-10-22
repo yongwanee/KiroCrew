@@ -213,3 +213,24 @@ async def _start_bound_port_app_backends() -> None:
         logger.info(
             "Started %d bound-port app backend(s): %s", len(deferred_apps), ", ".join(deferred_apps)
         )
+
+
+def _kick_default_app_installs(state: DashboardState) -> None:
+    """Install the edition's default registry apps as a tracked background task.
+
+    Kicked after the listener serves, like ``_kick_crewmate_prune``: an install
+    clones and builds, so it must never sit between the bind and
+    ``KIROCREW_READY``. Nothing waits on it. The public edition declares no
+    defaults, so there the pass reads one empty list and returns.
+    """
+    from kiro_crew.apps.default_installs import reconcile_default_installs
+
+    async def _run() -> None:
+        try:
+            await reconcile_default_installs()
+        except Exception:  # noqa: BLE001 -- a failed pass is retried next boot
+            logger.warning("default app installs failed", exc_info=True)
+
+    task = asyncio.create_task(_run())
+    state._background_tasks.add(task)
+    task.add_done_callback(state._background_tasks.discard)

@@ -439,6 +439,16 @@ class AgentConfig:
             "re-consent before code execution.",
         ),
     )
+    apps_default_installs_applied: list[str] = field(
+        default_factory=list,
+        metadata=_meta(
+            "Applied Default App Installs",
+            "App names this edition has already installed once on its own. "
+            "A name here is never installed again automatically, so an app you "
+            "uninstall or disable stays that way. Remove a name to let the "
+            "edition install that app again on the next start.",
+        ),
+    )
     apps_ui_stream_timeout_secs: int = field(
         default=30,
         metadata=_meta(

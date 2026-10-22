@@ -581,6 +581,11 @@ def _build_agent_config(agent_data: dict) -> AgentConfig:
             )
             else section.default("apps_trusted_repositories")
         ),
+        apps_default_installs_applied=(
+            [a for a in _applied if isinstance(a, str) and a]
+            if isinstance(_applied := section.get("apps_default_installs_applied"), list)
+            else section.default("apps_default_installs_applied")
+        ),
         apps_ui_stream_timeout_secs=section.read("apps_ui_stream_timeout_secs", _safe_int, 5, 600),
         jail=_normalize_jail(section.get("jail")),
         dangerously_skip_permissions=_read_skip_permissions(agent_data),

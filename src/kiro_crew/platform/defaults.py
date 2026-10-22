@@ -510,6 +510,11 @@ class DefaultAppsLoader:
         # (`""` / `"curated"` / `"community"`, which badge the dashboard shows).
         return []
 
+    def default_installed_apps(self) -> List[Dict[str, Any]]:
+        # The public edition installs nothing on its own. A companion names apps
+        # from a registry it pins at the owner tier (see the protocol docstring).
+        return []
+
 
 class DefaultPackageManager:
     """Public brew/winget/pip install strategy (the inline hints in doctor_checks/features.py).

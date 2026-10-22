@@ -153,6 +153,33 @@ class AppsLoader(Protocol):
         """
         ...
 
+    def default_installed_apps(self) -> List[Dict[str, Any]]:
+        """Registry apps the edition installs and trusts once, on first boot.
+
+        WIRED: ``apps/default_installs.py::reconcile_default_installs`` runs after
+        the dashboard listener serves. Each row is ``{"name": <app name>,
+        "registry": <registry id>}``. The row names NO repository: the clone
+        coordinates come from the registry row the named registry publishes, so a
+        companion can only pick apps out of a registry it already pins, never point
+        an install at code outside one.
+
+        The named registry must be one :meth:`default_registries` pins at the
+        ``owner`` trust tier. A row naming an operator-configured registry, an
+        ``index``-tier one, or an app whose resolved row comes from a different
+        registry is refused and logged, because the install records an execution
+        grant on the operator's behalf and only the build may vouch for that.
+
+        Each app is attempted until it succeeds once. After that its name is
+        recorded in ``agent.apps_default_installs_applied`` and the edition never
+        touches it again, so an operator who uninstalls or disables it keeps that
+        choice. An app that is already installed is recorded without being
+        reinstalled or re-enabled.
+
+        The public Default returns ``[]``: standalone never installs anything on
+        its own. v1 method addition (no ``CONTRACT_VERSION`` bump).
+        """
+        ...
+
 
 @dataclass(frozen=True)
 class MemoryRoots:

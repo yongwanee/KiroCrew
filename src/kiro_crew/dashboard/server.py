@@ -219,6 +219,7 @@ from kiro_crew.dashboard.server_runtime.api_entrypoint import (  # noqa: F401
     start_api_server,
 )
 from kiro_crew.dashboard.server_runtime.app_platform import (  # noqa: F401
+    _kick_default_app_installs,
     _reconcile_app_resources,
     _start_app_backends,
     _start_bound_port_app_backends,
@@ -1180,6 +1181,7 @@ async def start_dashboard(
     # authoritative write on this path. The headless entrypoint, which binds
     # via _start_site with no reservation step, still exports post-listen.)
     await _start_bound_port_app_backends()
+    _kick_default_app_installs(state)
     # Additional kernel-verifiable transport for the internal API (POSIX only;
     # degrades to TCP-only on any failure — see _start_unix_site).
     _unix_socket_holder["path"] = await _start_unix_site(runner, port)

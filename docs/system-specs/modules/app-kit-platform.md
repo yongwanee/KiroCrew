@@ -3015,6 +3015,62 @@ Writers: `apps/registry_pipeline/sources.py` (`_effective_registries`,
 (`AppsLoader.default_registries`), `config/loader.py`
 (`ExternalRegistryConfig.trust`), `apps/routes_registry.py` (`handle_registries`).
 
+### 15.1 Edition default installs
+
+`AppsLoader.default_installed_apps()` lets an edition ship a registry app already
+installed, the way `_DEFAULT_ON_BUILTINS` ships a builtin already enabled. Each row
+is `{name, registry}`. After the dashboard listener serves,
+`apps/default_installs.py::reconcile_default_installs` runs as a tracked background
+task and, for each name not yet in `agent.apps_default_installs_applied`, runs the
+same transaction as the App Store install button (`install_from_registry`, then
+register and start the backend, or suspend for session-approval re-consent).
+
+Installing registry code needs an execution grant, so the pass records one on the
+operator's behalf. Every rule below exists because of that:
+
+- **The row names no repository.** The clone coordinates are the ones the named
+  registry publishes. The pass refreshes that one registry's index first, then
+  refuses unless the row `get_registry_app` resolves for the name carries that
+  registry's `_registry` tag. A same-named row in the bundled seed, the official
+  catalog, or an operator registry resolves first and is therefore refused, not
+  installed.
+- **The registry must be build-pinned at `owner`.** `_registry_trust_tier_of` on
+  the `_pinned_registries()` row decides it. An operator-configured registry is
+  never eligible, even with a keystone grant: the grant is the operator trusting a
+  source for their own installs, not the build vouching for one.
+- **The grant is the consent dialog's grant.** `apps_trusted` plus
+  `apps_trusted_repositories[name]` bound to the normalized repository, so a later
+  repository change is refused at install and re-prompts like any other grant. A
+  builtin name is refused (a grant on it would be inherited by a later
+  third-party app of that name). An existing grant bound to a different repository
+  is never overwritten. When `config.local.json` owns a trust key the base write is
+  inert; the pass reads the grant back, and when it did not take effect it undoes
+  the write and skips the app.
+- **One success, then hand off.** The name is added to
+  `agent.apps_default_installs_applied` after a successful install, or straight
+  away when the app is already installed (its enabled state and grant untouched).
+  A marked name is never handled again, so uninstalling or disabling sticks. A
+  failed install withdraws only what the pass added (the repository binding, and
+  the name grant unless the operator already held a legacy one) and leaves the
+  name unmarked, so the next boot retries. Refusals are logged at error level and
+  also stay unmarked.
+- **A corrupt `config.json` installs nothing.** The loader reads a corrupt file as
+  defaults, so the applied list looks empty. The grant write goes through
+  `update_config_locked`, which refuses a corrupt file, and install runs only after
+  that write.
+
+The marker lives in `config.json` rather than a new data-home file because it sits
+beside the grants it guards and inherits their disposition: sealed read-only
+against an in-sandbox shell (`sandbox._CREW_READONLY_LEAVES`), written only by the
+settings surfaces outside the seal. The field is read at point of use, so it needs
+no live applier. Completed and failed installs are SEL-audited as
+`app_default_install`.
+
+Writers: `apps/default_installs.py`, `platform/interfaces_structural.py`
+(`AppsLoader.default_installed_apps`), `config/sections_agent.py`
+(`apps_default_installs_applied`), `dashboard/server_runtime/app_platform.py`
+(`_kick_default_app_installs`).
+
 ## 16. Store guidance and product screenshots are manifest-owned
 
 An App detail page carries three different kinds of information and does not
