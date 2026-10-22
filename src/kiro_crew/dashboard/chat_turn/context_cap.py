@@ -1,18 +1,24 @@
-"""The conductor context cap (``docs/request-for-change/rfc-conductor-context-cap.md``).
+"""The context cap: goal conductors (``docs/request-for-change/rfc-conductor-context-cap.md``)
+and dispatched workers (``docs/request-for-change/rfc-worker-context-cap.md``).
 
-A goal conductor's KAS chat over its marks is trimmed at a dashboard turn's start,
-before the turn claims its session: the KAS conversation ends through
-``discard_conversation(replay=True)``, and the session the turn then starts is seeded
-with a trim note, the session-ledger snapshot and a longer text tail of the transcript.
-No model call is spent, and the transcript on disk gains only the notice row.
+A goal conductor's or a bound worker's KAS chat over its marks is trimmed at a
+dashboard turn's start, before the turn claims its session: the KAS conversation ends
+through ``discard_conversation(replay=True)``, and the session the turn then starts is
+seeded from what the chat already keeps. A conductor's seed is a trim note, the
+session-ledger snapshot and a longer text tail of the transcript; a worker's is a trim
+note, its work item (brief and latest report), the files it edited and a text tail
+sized in tokens. No model call is spent, and the transcript on disk gains only the
+notice row.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import time
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -42,15 +48,55 @@ CONTEXT_CAP_DAMPING_TOKENS = 50_000
 #: session's ~55K-token start and ~5K for the note, the snapshot and the message, at
 #: 3 chars per token. Every other cold start keeps ``_REPLAY_BUDGET_CHARS``.
 CONTEXT_CAP_TAIL_CHARS = 270_000
-#: Trims remembered at once, one per conductor chat key; past it the oldest goes.
+#: Trims remembered at once, one per capped chat key; past it the oldest goes.
 _CONTEXT_CAP_MAX_TRIMS = 256
+
+#: The agent a dispatched worker runs; it is capped only while its session is bound to
+#: a work item (``work_ledger.read_binding``), which is what its seed is built from.
+WORKER_CAP_AGENT = "kirocrew-worker"
+#: Worker Rule B: over this, once the cache has expired, a worker is trimmed. A worker
+#: is never trimmed under it on a warm cache (rfc-worker-context-cap section 5.2).
+WORKER_CAP_IDLE_TOKENS = 200_000
+#: Worker safety line (its Rule A): over this a worker is trimmed warm or cold, before
+#: a long turn can reach KAS's own summarization at 80% of a 1M window.
+WORKER_CAP_HIGH_TOKENS = 600_000
+#: A worker trim's text tail, in estimated tokens (``model_route.prompt_tokens``): the
+#: room 150K leaves after a fresh worker session's ~46K and ~4K for the seed's head.
+WORKER_CAP_TAIL_TOKENS = 100_000
+#: Edited files a worker's seed lists, newest first, paths only.
+WORKER_CAP_MAX_EDITED_FILES = 30
+#: Transcript rows read back for the edited-file and skill-file lists.
+_CONTEXT_CAP_SCAN_ROWS = 4_000
+#: Skill and instruction files a seed lists, newest first, paths only. A trim drops
+#: their bodies with the rest of the tool output, so the note asks for a re-read.
+CONTEXT_CAP_MAX_SKILL_FILES = 10
+#: File names that are skill bodies or agent instruction files.
+_INSTRUCTION_FILE_NAMES = frozenset({"SKILL.md", "AGENTS.md", "CLAUDE.md"})
+#: Heads the seed's skill-file list, in both seeds.
+CONTEXT_CAP_SKILL_FILES_HEADING = (
+    "[Skill and instruction files this chat read before the trim, newest first: "
+    "re-read them before you act on them]"
+)
+
+#: Opens a trimmed worker session's replay.
+WORKER_CAP_TRIM_NOTE = (
+    "[Context trimmed: this chat moved to a new session at the start of this turn, to "
+    "keep its context small. Tool calls, their output, your reasoning and older "
+    "messages are not in this context; your work item, your latest work_report, the "
+    "skill files you read, the files you edited and the newest messages follow. "
+    "Everything else is in this chat's transcript: search_chat_history searches it and "
+    "get_chat_session reads it ({transcript}). Before acting, first re-read the skill "
+    "and instruction files listed below, then re-read the files you are editing from "
+    "your worktree, and re-read your pull request's state.]"
+)
 
 #: Opens a trimmed session's replay: what the model needs to know about the trim.
 CONTEXT_CAP_TRIM_NOTE = (
     "[Context trimmed: this chat moved to a new session at the start of this turn, to "
     "keep its context small. Its newest messages follow as text. Tool calls, their "
     "output and older messages are not in this context. They are in this chat's "
-    "transcript: search_chat_history searches it and get_chat_session reads it.]"
+    "transcript: search_chat_history searches it and get_chat_session reads it. "
+    "First re-read any skill and instruction files listed below.]"
 )
 
 #: The notice row a trim leaves in the transcript, for the person. It names only the
@@ -75,6 +121,11 @@ class _CapTrim:
     #: start that reads it. The damping guard counts from that reading.
     sid: str = ""
     first_tokens: int = 0
+    #: Whose marks and seed: ``"conductor"`` or ``"worker"``.
+    kind: str = "conductor"
+    #: ``meta.trim`` on this trim's own notice row. The seed's file scan passes over
+    #: that row (it may be flushed before the seed is built) and stops at any other.
+    notice_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 #: Session key -> the trim that started the session now on that key.
@@ -89,7 +140,7 @@ async def _cap_conductor_context(
     *,
     is_slash: bool,
 ) -> str:
-    """Trim *slot*'s conductor KAS chat when it is over a mark, before the turn claims it.
+    """Trim *slot*'s conductor or bound-worker KAS chat over its marks, before the claim.
 
     Runs at a dashboard turn's start, beside the pending-reset consume. Returns
     ``"trimmed"`` or the hold that stopped the trim (RFC section 3.4); every hold
@@ -122,7 +173,12 @@ async def _context_cap_trim(
     # An unreadable config reads as off: a trim is never the fallback.
     if cfg is None or not cfg.session.context_cap:
         return "cap_off"
-    if str(slot.agent or "") not in WAKE_RESET_AGENTS:
+    agent = str(slot.agent or "")
+    if agent in WAKE_RESET_AGENTS:
+        kind = "conductor"
+    elif agent == WORKER_CAP_AGENT:
+        kind = "worker"
+    else:
         return "out_of_scope"
     if is_slash:
         return "slash_command"
@@ -132,11 +188,14 @@ async def _context_cap_trim(
     backend = getattr(provider, "harness_managed_compaction_backend", None)
     if not (isinstance(backend, str) and backend):
         return "out_of_scope"
+    if kind == "worker" and await _context_cap_worker_binding(session_key) is None:
+        # An unbound worker chat has no item to seed from (rfc-worker-context-cap 5.1).
+        return "out_of_scope"
     tokens = _context_cap_reading(provider)
     if tokens is None:
         return "unknown_reading"
     floor = _context_cap_damping_floor(state, session_key, tokens)
-    rule = _context_cap_rule(tokens, _context_cap_idle_secs(state, session_key))
+    rule = _context_cap_rule(tokens, _context_cap_idle_secs(state, session_key), kind=kind)
     if rule is None:
         return "below_marks"
     if floor is not None and tokens < floor:
@@ -164,8 +223,8 @@ async def _context_cap_trim(
             hold,
         )
         return hold
-    _remember_context_cap_trim(session_key)
-    _append_context_cap_notice(state, slot, tokens)
+    trim = _remember_context_cap_trim(session_key, kind=kind)
+    _append_context_cap_notice(state, slot, tokens, trim.notice_id)
     logger.info(
         "Context cap: slot %s at %dK of context (rule %s) trimmed; this turn starts a new session",
         slot.key,
@@ -175,18 +234,36 @@ async def _context_cap_trim(
     return "trimmed"
 
 
-def _context_cap_rule(tokens: int, idle_secs: float | None) -> str | None:
+def _context_cap_rule(
+    tokens: int, idle_secs: float | None, *, kind: str = "conductor"
+) -> str | None:
     """The rule that trims a session at *tokens* whose previous turn ended *idle_secs* ago.
 
-    Rule A: over HIGH. Rule B: over the Rule B line once the cache life has passed,
-    when the next request writes a new cache either way. ``None``: neither holds.
+    Rule A: over HIGH (a worker's safety line). Rule B: over the Rule B line once the
+    cache life has passed, when the next request writes a new cache either way.
+    ``None``: neither holds. *kind* picks the marks: the conductor's or a worker's.
     """
-    if tokens > CONTEXT_CAP_HIGH_TOKENS:
+    if kind == "worker":
+        high, idle_line = WORKER_CAP_HIGH_TOKENS, WORKER_CAP_IDLE_TOKENS
+    else:
+        high, idle_line = CONTEXT_CAP_HIGH_TOKENS, CONTEXT_CAP_IDLE_TOKENS
+    if tokens > high:
         return "A"
     if idle_secs is not None and idle_secs >= CONTEXT_CAP_CACHE_SECS:
-        if tokens > CONTEXT_CAP_IDLE_TOKENS:
+        if tokens > idle_line:
             return "B"
     return None
+
+
+async def _context_cap_worker_binding(session_key: str) -> tuple[str, str] | None:
+    """The ``(conductor key, item id)`` a worker session is bound to, or ``None``.
+
+    The same lookup ``work_brief`` resolves, under the ledger's spelling of the key.
+    """
+    from kiro_crew import work_ledger
+    from kiro_crew.session_ledger import ledger_key
+
+    return await asyncio.to_thread(work_ledger.read_binding, ledger_key(session_key))
 
 
 def _context_cap_reading(provider: Any) -> int | None:
@@ -267,14 +344,17 @@ async def _context_cap_discard(state: DashboardState, slot: _ChatSlot, session_k
     return True
 
 
-def _remember_context_cap_trim(session_key: str) -> None:
+def _remember_context_cap_trim(session_key: str, *, kind: str = "conductor") -> _CapTrim:
     _CONTEXT_CAP_TRIMS.pop(session_key, None)
     while len(_CONTEXT_CAP_TRIMS) >= _CONTEXT_CAP_MAX_TRIMS:
         _CONTEXT_CAP_TRIMS.pop(next(iter(_CONTEXT_CAP_TRIMS)))
-    _CONTEXT_CAP_TRIMS[session_key] = _CapTrim()
+    trim = _CONTEXT_CAP_TRIMS[session_key] = _CapTrim(kind=kind)
+    return trim
 
 
-def _append_context_cap_notice(state: DashboardState, slot: _ChatSlot, tokens: int) -> None:
+def _append_context_cap_notice(
+    state: DashboardState, slot: _ChatSlot, tokens: int, notice_id: str = ""
+) -> None:
     """One notice row per trim, drawn by the compaction card; the replay skips it."""
     from kiro_crew.context_assembly.replay import CONTEXT_CAP_NOTICE
     from kiro_crew.dashboard.state import _RESTART_MEMORY_TAIL
@@ -287,7 +367,7 @@ def _append_context_cap_notice(state: DashboardState, slot: _ChatSlot, tokens: i
             "assistant",
             f"{text} {_RESTART_MEMORY_TAIL}",
             "msg msg-a",
-            meta={"kind": "compaction", "notice": CONTEXT_CAP_NOTICE},
+            meta={"kind": "compaction", "notice": CONTEXT_CAP_NOTICE, "trim": notice_id},
         )
     except Exception:
         logger.debug("Context cap: notice row failed for slot %s", slot.key, exc_info=True)
@@ -338,8 +418,35 @@ def _drop_context_cap_seed(session_key: str) -> None:
         trim.seed_pending = False
 
 
-async def _context_cap_seed_head(session_key: str) -> str:
-    """The trim note and the session-ledger snapshot that open a trimmed session's replay.
+def _context_cap_seed_budget(session_key: str) -> dict[str, int]:
+    """``build_session_replay``'s budget for the seed of the trim on *session_key*.
+
+    A conductor's tail is ``CONTEXT_CAP_TAIL_CHARS`` chars; a worker's is
+    ``WORKER_CAP_TAIL_TOKENS`` estimated tokens.
+    """
+    trim = _CONTEXT_CAP_TRIMS.get(session_key)
+    if trim is not None and trim.kind == "worker":
+        return {"budget_tokens": WORKER_CAP_TAIL_TOKENS}
+    return {"budget_chars": CONTEXT_CAP_TAIL_CHARS}
+
+
+async def _context_cap_seed_head(
+    session_key: str, conversation_log: Any = None, state: DashboardState | None = None
+) -> str:
+    """What opens a trimmed session's replay, before its text tail.
+
+    A conductor's: the trim note, the session-ledger snapshot and the skill files it
+    read. A worker's: its trim note, its work item, the skill files it read and the
+    files it edited (:func:`_worker_cap_seed_head`).
+    """
+    trim = _CONTEXT_CAP_TRIMS.get(session_key)
+    if trim is not None and trim.kind == "worker":
+        return await _worker_cap_seed_head(session_key, conversation_log, state)
+    return await _conductor_cap_seed_head(session_key, conversation_log)
+
+
+async def _conductor_cap_seed_head(session_key: str, conversation_log: Any = None) -> str:
+    """The trim note, the session-ledger snapshot and the skill files a conductor read.
 
     The snapshot is the block a patrol wake already carries (``compose_nudge_body``),
     read off the loop; a failed read costs the snapshot, never the seed.
@@ -351,7 +458,196 @@ async def _context_cap_seed_head(session_key: str) -> str:
     except Exception:
         logger.debug("Context cap: ledger snapshot failed for %s", session_key, exc_info=True)
         snapshot = ""
-    head = CONTEXT_CAP_TRIM_NOTE + "\n\n"
+    _edited, skills = await _context_cap_file_lists(conversation_log, session_key)
+    parts = [CONTEXT_CAP_TRIM_NOTE]
     if snapshot:
-        head += snapshot + "\n\n"
-    return head
+        parts.append(snapshot)
+    if skills:
+        parts.append(_file_block(CONTEXT_CAP_SKILL_FILES_HEADING, skills))
+    return "\n\n".join(parts) + "\n\n"
+
+
+async def _worker_cap_seed_head(
+    session_key: str, conversation_log: Any, state: DashboardState | None = None
+) -> str:
+    """The trim note, the work item, the skill files read and the files edited.
+
+    Each part that fails to read costs that part, never the seed. The item block is
+    private dispatch data, so it is read the way ``work_brief`` reads it
+    (:func:`_worker_cap_item`) and passes the ledger's entry gate after the last
+    await (:func:`_worker_cap_admit_item`).
+    """
+    try:
+        note = await asyncio.to_thread(_worker_cap_note, session_key)
+    except Exception:
+        logger.debug("Context cap: transcript path failed for %s", session_key, exc_info=True)
+        note = WORKER_CAP_TRIM_NOTE.format(transcript="its transcript file")
+    try:
+        item = await _worker_cap_item(session_key)
+    except Exception:
+        logger.debug("Context cap: worker item read failed for %s", session_key, exc_info=True)
+        item = ""
+    edited, skills = await _context_cap_file_lists(conversation_log, session_key)
+    if item and not _worker_cap_admit_item(state, session_key):
+        item = ""
+    parts = [note]
+    if item:
+        parts.append(item)
+    if skills:
+        parts.append(_file_block(CONTEXT_CAP_SKILL_FILES_HEADING, skills))
+    if edited:
+        parts.append(_file_block("[Files you edited in this chat, newest first]", edited))
+    return "\n\n".join(parts) + "\n\n"
+
+
+def _worker_cap_admit_item(state: DashboardState | None, session_key: str) -> bool:
+    """Whether the work item may enter this session's seed, recording its audience.
+
+    The one gate every ledger route passes (``caller_admission``): refused when the
+    session's replies reach a channel audience. On admission it records the audience
+    the session was admitted under (``record_audience_admission``), so a mirror
+    gained before the reply publishes still withholds it. Fails closed: a missing
+    item costs a ``work_brief`` call; a published one cannot be taken back.
+    """
+    if state is None:
+        return False
+    from kiro_crew.dashboard import session_control
+    from kiro_crew.dashboard.handlers.work_ledger_caller import caller_admission
+
+    try:
+        why, slot, admission = caller_admission(state, session_key)
+        if why:
+            return False
+        if admission is not None:
+            session_control.record_audience_admission(slot, admission)
+    except Exception:
+        logger.debug("Context cap: channel check failed for %s", session_key, exc_info=True)
+        return False
+    return True
+
+
+def _file_block(heading: str, paths: list[str]) -> str:
+    return heading + "\n" + "\n".join(f"- {p}" for p in paths)
+
+
+def _worker_cap_note(session_key: str) -> str:
+    """The worker's trim note, naming its transcript file."""
+    from kiro_crew.history_files import _sessions_dir, transcript_stem
+
+    transcript = str(_sessions_dir() / f"{transcript_stem(session_key)}.jsonl")
+    return WORKER_CAP_TRIM_NOTE.format(transcript=transcript)
+
+
+async def _worker_cap_item(session_key: str) -> str:
+    """The worker's work-item block, read the way ``work_brief`` reads it.
+
+    The brief (title, acceptance, the conductor's decision) and the item's latest
+    ``work_report`` (status, summary, artifacts, pull request), read through the
+    worker's own binding, under the board's lock and never while its cache is
+    flagged dirty (``_refuse_if_dirty``). ``""`` when the binding or the item is gone
+    or the cache is dirty.
+    """
+    from kiro_crew import work_ledger
+    from kiro_crew.dashboard.handlers.work_ledger_recording import _board_lock
+
+    binding = await _context_cap_worker_binding(session_key)
+    if binding is None:
+        return ""
+    async with _board_lock(binding[0]):
+        if await asyncio.to_thread(work_ledger.cache_dirty, binding[0]) is not None:
+            return ""
+        item = await asyncio.to_thread(work_ledger.read_work_item, *binding)
+    if item is None:
+        return ""
+    lines = [
+        "[Your work item: the brief work_brief returns, and your latest work_report]",
+        f"title: {item.title}",
+        f"acceptance: {json.dumps(item.acceptance, ensure_ascii=False, sort_keys=True)}",
+        f"conductor's decision: {item.decision or '(none)'}",
+        f"latest report: {item.status or '(none yet)'}"
+        + (f" ({item.reason})" if item.reason else ""),
+    ]
+    if item.summary:
+        lines.append(f"summary: {item.summary}")
+    for key in sorted(item.artifacts or {}):
+        lines.append(f"artifact {key}: {item.artifacts[key]}")
+    if item.pr is not None:
+        lines.append(f"pr: {item.pr}")
+    return "\n".join(lines)
+
+
+async def _context_cap_file_lists(
+    conversation_log: Any, session_key: str
+) -> tuple[list[str], list[str]]:
+    """``(files edited, skill files read)`` since the last trim; ``([], [])`` on failure."""
+    if conversation_log is None:
+        return [], []
+    try:
+        return await asyncio.to_thread(_context_cap_scan_files, conversation_log, session_key)
+    except Exception:
+        logger.debug("Context cap: file list read failed for %s", session_key, exc_info=True)
+        return [], []
+
+
+def _context_cap_scan_files(conversation_log: Any, session_key: str) -> tuple[list[str], list[str]]:
+    """Paths the chat's tool rows name since its last trim, newest first, deduped.
+
+    Edited: every file an edit row names, at most ``WORKER_CAP_MAX_EDITED_FILES``.
+    Skills: every skill or instruction file a read row names
+    (:func:`_is_skill_or_instruction_file`), at most ``CONTEXT_CAP_MAX_SKILL_FILES``.
+    The scan passes over the current trim's own notice row, which the flush may have
+    persisted before this seed is built, and stops at any other notice row: what an
+    earlier session read is not in the session that trim started, and its own seed
+    listed it then.
+    """
+    from kiro_crew.context_assembly.replay import is_context_cap_notice
+
+    trim = _CONTEXT_CAP_TRIMS.get(session_key)
+    current = trim.notice_id if trim is not None else None
+    rows = conversation_log.read_messages_chained_tail(session_key, _CONTEXT_CAP_SCAN_ROWS)
+    edited: list[str] = []
+    skills: list[str] = []
+    for row in reversed(rows):
+        if is_context_cap_notice(row):
+            if current and (row.get("meta") or {}).get("trim") == current:
+                continue
+            break
+        meta = row.get("meta")
+        if row.get("role") != "tool" or not isinstance(meta, dict):
+            continue
+        path = _tool_row_path(meta.get("input"))
+        if not path:
+            continue
+        kind = meta.get("kind")
+        if kind == "edit" and path not in edited and len(edited) < WORKER_CAP_MAX_EDITED_FILES:
+            edited.append(path)
+        elif (
+            kind == "read"
+            and _is_skill_or_instruction_file(path)
+            and path not in skills
+            and len(skills) < CONTEXT_CAP_MAX_SKILL_FILES
+        ):
+            skills.append(path)
+    return edited, skills
+
+
+def _is_skill_or_instruction_file(path: str) -> bool:
+    """A skill body, an agent instruction file, or a steering file."""
+    norm = path.replace("\\", "/")
+    name = norm.rsplit("/", 1)[-1]
+    return name in _INSTRUCTION_FILE_NAMES or "/.kiro/steering/" in norm
+
+
+def _tool_row_path(tool_input: Any) -> str:
+    """The file a tool row's input names: a ``--- file://`` diff or a ``path`` arg."""
+    if not isinstance(tool_input, str):
+        return ""
+    head = tool_input.split("\n", 1)[0]
+    if head.startswith("--- file://"):
+        return head[len("--- file://") :].strip()
+    try:
+        args = json.loads(tool_input)
+    except ValueError:
+        return ""
+    path = args.get("path") if isinstance(args, dict) else None
+    return path.strip() if isinstance(path, str) else ""

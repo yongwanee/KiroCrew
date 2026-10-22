@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict, deque
+from collections.abc import Callable
 from collections.abc import Set as AbstractSet
 
 from kiro_crew.context_assembly import budget as _budgets
@@ -382,7 +383,11 @@ def _quota_tail(messages: list[dict], *, conv_max: int, inject_max: int) -> list
 
 
 def replay_text(
-    messages: list[dict], model_window: int | None, *, budget_chars: int = _REPLAY_BUDGET_CHARS
+    messages: list[dict],
+    model_window: int | None,
+    *,
+    budget_chars: int = _REPLAY_BUDGET_CHARS,
+    budget_tokens: int | None = None,
 ) -> str:
     """The tail-heavy replay of *messages* within the window-scaled replay budget.
 
@@ -392,7 +397,9 @@ def replay_text(
 
     *budget_chars* is the budget at the reference window: ``_REPLAY_BUDGET_CHARS``
     for every cold start but the conductor context cap's trim, which passes a
-    larger one.
+    larger one. *budget_tokens*, when given, replaces it with a budget in estimated
+    tokens (``model_route.prompt_tokens``): the worker context cap's trim sizes its
+    tail that way, since chars per token vary several-fold with the text's script.
     """
     # Replay is a separate, existing tail-history allowance, not background
     # capacity. Preserve small-window replay limits; larger windows cannot
@@ -401,8 +408,18 @@ def replay_text(
         0.2,
         min(1.0, _budgets._effective_window(model_window) / _budgets._REFERENCE_WINDOW_TOKENS),
     )
-    replay_budget = round(budget_chars * factor)
-    inject_cap = max(1, min(replay_budget, round(_REPLAY_INJECT_CAP_CHARS * factor)))
+    size: Callable[[str], int]
+    if budget_tokens is None:
+        size, separator = len, 2
+        replay_budget = round(budget_chars * factor)
+    else:
+        from kiro_crew.decisions.points.model_route import prompt_tokens
+
+        size, separator = prompt_tokens, 1
+        replay_budget = round(budget_tokens * factor)
+    inject_cap = max(1, round(_REPLAY_INJECT_CAP_CHARS * factor))
+    if budget_tokens is None:
+        inject_cap = min(replay_budget, inject_cap)
 
     # Reserved so conversation cannot be starved by breadcrumbs: inject rows spend
     # their own share and older ones are skipped, while the scan keeps looking for
@@ -419,14 +436,15 @@ def replay_text(
         if m["role"] == "inject" and len(content) > inject_cap:
             content = content[:inject_cap] + "…[truncated]"
         line = f"{role}: {content}"
-        if m["role"] == "inject" and inject_total + len(line) > inject_budget and lines:
+        cost = size(line)
+        if m["role"] == "inject" and inject_total + cost > inject_budget and lines:
             continue
-        if total + len(line) > replay_budget and lines:
+        if total + cost > replay_budget and lines:
             break
         lines.append(line)
-        total += len(line) + 2  # +2 for separator
+        total += cost + separator
         if m["role"] == "inject":
-            inject_total += len(line) + 2
+            inject_total += cost + separator
 
     lines.reverse()
     return "\n\n".join(lines)

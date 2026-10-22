@@ -176,13 +176,20 @@ on the old session.
    fresh conductor session starts at about 55K tokens.
 2. A trim note for the model: the chat was trimmed at this turn's start, the
    newest messages follow as text, tool output and older messages are not in
-   context, and `search_chat_history` finds them in the transcript.
+   context, and `search_chat_history` finds them in the transcript. It asks
+   the conductor to re-read the skill and instruction files listed first.
 3. The summary: the session-ledger snapshot (`render_snapshot` in
    `src/kiro_crew/session_ledger.py`, at most 1,600 chars: goal, phase, next,
    tried, artifacts). A patrol wake already carries the same block
    (`compose_nudge_body`), so on a wake it appears twice, once per trim. The
    work ledger is not copied: the conductor's prompt already has it read the
    ledger first, every cycle.
+3a. The skill and instruction files the chat read since its session started
+   or its last trim (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.kiro/steering/`
+   files its read tool rows name), as paths only, newest first, at most 10.
+   A skill loaded with `read_file` is tool output, which the trim drops. Added
+   with the worker cap ([rfc-worker-context-cap.md](rfc-worker-context-cap.md)
+   section 5.3), which both seeds share.
 4. The tail: `build_session_replay` over the slot's transcript with today's
    row rules (user, assistant and inject rows, newest first; no tool rows; at
    most 500 user and assistant rows and 10 inject rows, each inject row

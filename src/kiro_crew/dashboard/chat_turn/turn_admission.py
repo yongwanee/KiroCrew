@@ -743,10 +743,11 @@ async def _turn_admit(turn: _ChatTurn) -> _Flow | None:
     # account instead of running as the previous one.
     await _retire_sessions_on_identity_change(state)
     _require_current_binding(turn)
-    # The conductor context cap, before the claim for the same reason as the two
-    # above and after the binding check, so it reads the binding this turn runs on: a
-    # goal conductor's KAS chat over its marks is trimmed, and this turn starts a new
-    # session seeded from the transcript instead of re-sending it all.
+    # The context cap, before the claim for the same reason as the two above and
+    # after the binding check, so it reads the binding this turn runs on: a goal
+    # conductor's or a bound worker's KAS chat over its marks is trimmed, and this
+    # turn starts a new session seeded from what the chat keeps instead of re-sending
+    # it all.
     await _cap_conductor_context(state, slot, session_key, loaded_cfg, is_slash=is_slash)
     # A linked channel can retain a dashboard-owned key. Resolve both the
     # dedicated Slack field and any inbound-capable channel-neutral mirror

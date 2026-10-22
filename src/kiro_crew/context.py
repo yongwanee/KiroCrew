@@ -1219,12 +1219,15 @@ def build_session_replay(
     pending_messages: list[dict] | None = None,
     current_message: dict | None = None,
     budget_chars: int = _REPLAY_BUDGET_CHARS,
+    budget_tokens: int | None = None,
 ) -> str | None:
     """Build session replay from KiroCrew's conversation_log.
 
     Keeps as many recent messages as fit within *budget_chars*
     (``_REPLAY_BUDGET_CHARS`` unless the conductor context cap's trim asks for
-    its larger tail), prioritizing the most recent exchanges (tail-heavy). Used
+    its larger tail), or within *budget_tokens* estimated tokens when the worker
+    context cap's trim sizes its tail in tokens, prioritizing the most recent
+    exchanges (tail-heavy). Used
     when a session is picked up by a different provider or after process death.
 
     Same-provider resume uses native ACP session/load instead (full fidelity
@@ -1250,7 +1253,9 @@ def build_session_replay(
     if not messages:
         return None
 
-    replay = _replay.replay_text(messages, model_window, budget_chars=budget_chars)
+    replay = _replay.replay_text(
+        messages, model_window, budget_chars=budget_chars, budget_tokens=budget_tokens
+    )
     replay, _ = redact_exfiltration_urls(replay)
     replay, _ = redact_credentials(replay)
     return replay.translate(_MULTIBYTE_TABLE)

@@ -266,19 +266,37 @@ Built where every cold start builds its history
    output, reasoning and older messages are not in context. They are in the
    chat's transcript: `search_chat_history` searches it, `get_chat_session`
    reads it, and the file is `~/.kiro/crew/sessions/dashboard_<slot>.jsonl`.
-   Before acting, re-read the files you are editing from your worktree, and
-   re-read your PR's state.
+   Before acting, first re-read the skill and instruction files listed
+   below, then the files you are editing from your worktree, and your PR's
+   state.
 3. **The work brief**: title, acceptance and the conductor's decision
    (`work_ledger.read_work_brief`).
 4. **The item's latest `work_report`**: status, summary and artifacts
-   (worktree, branch, head SHA, PR).
-5. **The files edited** since the session started or the last trim, as paths
+   (worktree, branch, head SHA, PR). Items 3 and 4 are read the way
+   `work_brief` reads them: under the board lock, and never while the cache is
+   flagged dirty. They pass the ledger's entry gate (`caller_admission`) after
+   the seed's last read, which records the audience the session was admitted
+   under. A session whose replies reach a channel, or whose check fails, gets
+   no item block; it can still call `work_brief`, which refuses it the same way.
+5. **The skill and instruction files read** since the session started or the
+   last trim (the scan passes over this trim's own notice row, tagged with
+   the trim's id, and stops at any earlier one; `SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.kiro/steering/` files
+   the chat's read tool rows name), as paths only, newest first, at most 10.
+   Workers load skills with `read_file`, so a trim drops their bodies with
+   the rest of the tool output: `kirocrew-prepare-pr/SKILL.md` alone is read
+   156 times in the 42 worker sessions. Per would-be trim: p50 2, p90 5,
+   max 13 files; 36 of 54 trims list at least one, 1 hits the 10 cap.
+6. **The files edited** since the session started or the last trim, as paths
    only, newest first, at most 30. p50 13, p90 23 files; about 530 tokens at
    the p90. Only 5 of the 33 redo files were on it, so it is a pointer to the
    worktree, not a replacement for re-reading.
-6. **The text tail** (`build_session_replay`, today's row rules), under the
+7. **The text tail** (`build_session_replay`, today's row rules), under the
    100K-token budget.
-7. The turn's own message.
+8. The turn's own message.
+
+The new session is a brand-new chat's session in every other way: the same
+session-start context build with the slot's agent, the same model, effort,
+cwd and channel at the claim, and so the same MCP servers.
 
 A worker re-grounds from what it already owns. Its worktree and branch hold
 the code, and its PR holds the checks and reviews. The seed names all three,
