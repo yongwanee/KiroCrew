@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from contextlib import aclosing
 from dataclasses import dataclass, field
@@ -72,6 +73,11 @@ from kiro_crew.acp.types import (
     JsonRpcMessage,
     steering_outcome,
 )
+from kiro_crew.agent_sdk.backends import (
+    ACP_BACKEND_CLAUDE,
+    ACP_BACKEND_LAUNCH,
+    ACP_BACKEND_NODE_ADAPTER_PACKAGES,
+)
 from kiro_crew.executors import subprocess_executor
 from kiro_crew.security import redact_credentials, redact_exfiltration_urls
 
@@ -112,6 +118,45 @@ def steering_advertised(init_resp: object) -> bool:
     meta = init_resp.get("_meta") if isinstance(init_resp, dict) else None
     steering = meta.get("steering") if isinstance(meta, dict) else None
     return isinstance(steering, dict) and steering.get("supported") is True
+
+
+#: The oldest goose that serves ``_goose/unstable/session/steer`` as Crew sends it:
+#: 1.38.0 ("Steering messages with ACP", block/goose#9560) added the request with
+#: ``expectedRunId``, the ``{runId, messageId}`` answer, ``activeRunId`` on
+#: ``session_info_update`` and the ``_meta.goose.steer`` echo. 1.37.0 has none of
+#: them, so its answer is ``-32601`` and every steer queues.
+GOOSE_STEER_MIN_VERSION = (1, 38, 0)
+
+#: The release each adapter needs before the card's ``mid_turn_steer`` line is true.
+#: Read at the handshake, like pi's floor before spawn: below it the session is
+#: refused with the upgrade command, so the card never promises a steer it queues.
+_STEER_MIN_VERSIONS: dict[str, tuple[tuple[int, int, int], str]] = {
+    ACP_BACKEND_CLAUDE: (
+        CLAUDE_ACP_STEERING_MIN_VERSION,
+        f"npm i -g {ACP_BACKEND_NODE_ADAPTER_PACKAGES[ACP_BACKEND_CLAUDE]}",
+    ),
+    ACP_BACKEND_GOOSE: (
+        GOOSE_STEER_MIN_VERSION,
+        ACP_BACKEND_LAUNCH[ACP_BACKEND_GOOSE].install_command,
+    ),
+}
+
+
+def steer_version_issue(backend: str, agent_version: str) -> str:
+    """Why *agent_version* of *backend* is too old to steer, or ``""`` when it is not
+    known to be. An absent or unreadable version is not refused, as for pi."""
+    floor_and_fix = _STEER_MIN_VERSIONS.get(backend)
+    if floor_and_fix is None or not re.match(r"\d{1,9}\.\d{1,9}\.\d{1,9}", agent_version or ""):
+        return ""
+    floor, fix = floor_and_fix
+    if _adapter_version_at_least(agent_version, floor):
+        return ""
+    minimum = ".".join(str(part) for part in floor)
+    return (
+        f"{backend} {agent_version} is too old: Kiro Crew needs {minimum} or newer, "
+        f"where a message sent while it works reaches it. "
+        f"Update it: run '{fix}', then start a new chat."
+    )
 
 
 def format_command_result(result: dict) -> str:

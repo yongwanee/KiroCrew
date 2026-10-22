@@ -51,7 +51,7 @@ from kiro_crew.acp.client_spawn_env import (
     kiro_cli_not_found_message,
 )
 from kiro_crew.acp.client_timeouts import _ACP_RESPAWN_BACKOFF_S, _INIT_TIMEOUT
-from kiro_crew.acp.client_turn_control import steering_advertised
+from kiro_crew.acp.client_turn_control import steer_version_issue, steering_advertised
 from kiro_crew.acp.harness import process_adapter_for
 from kiro_crew.acp.harness.base import SpawnContext, SpawnPlan
 from kiro_crew.acp.launch import LaunchRequest, launch
@@ -799,6 +799,11 @@ async def _initialize_session(self: AcpClient) -> None:
     self._steering_advertised = steering_advertised(init_resp)
     self._note_pi_adapter_version()
     self._note_goose_version()
+    # Before session/new, so a too-old adapter is refused with its fix named
+    # rather than serving a chat whose mid-turn messages silently queue.
+    steer_issue = steer_version_issue(self.backend, self._agent_version)
+    if steer_issue:
+        raise AcpError(steer_issue)
 
     # The subprocess has now read its agent spec, which closes the window the
     # pre-spawn snapshot opened: a write landing before this point is caught here,
