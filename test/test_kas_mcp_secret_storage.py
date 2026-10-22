@@ -262,16 +262,16 @@ async def test_a_vault_failure_is_a_value_free_refusal(tmp_path, monkeypatch, ca
 # ── the opt-in key and the handshake ──────────────────────────────────────────
 
 
-def test_the_key_is_off_by_default_and_read_from_config(tmp_path, monkeypatch):
+def test_the_key_is_on_by_default_and_read_from_config(tmp_path, monkeypatch):
     from kiro_crew.config import loader as L
     from kiro_crew.config.loader import KiroCrewConfig
 
     monkeypatch.setattr(L, "config_dir", lambda: tmp_path)
-    assert KiroCrewConfig.load().agent.kas_persist_mcp_sign_in is False
-    assert kss.persistence_enabled() is False
-    (tmp_path / "config.json").write_text(json.dumps({"agent": {"kas_persist_mcp_sign_in": True}}))
     assert KiroCrewConfig.load().agent.kas_persist_mcp_sign_in is True
     assert kss.persistence_enabled() is True
+    (tmp_path / "config.json").write_text(json.dumps({"agent": {"kas_persist_mcp_sign_in": False}}))
+    assert KiroCrewConfig.load().agent.kas_persist_mcp_sign_in is False
+    assert kss.persistence_enabled() is False
 
 
 def test_the_shipped_declaration_never_carries_secret_storage():
