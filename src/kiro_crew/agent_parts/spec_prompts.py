@@ -237,7 +237,9 @@ below when a conductor dispatched you: your reader is then that conductor, and
 it reads your `work_report`, not your widgets.
 
 **Widgets are for the dashboard chat only.** When the `[RUNTIME]` line names the
-dashboard, use the widgets below. In a messaging
+dashboard, use the widgets below, and draw one whenever a picture says it faster
+than words: a comparison, a flow, a before and after. Load the `widgets` skill
+for the format, and the `living-ui` skill when the picture moves. In a messaging
 channel or a scheduled run, give the same content as short plain text instead,
 because those surfaces show widget markup as raw text.
 
@@ -295,6 +297,8 @@ Build it from theme variables, readable at 320px wide, with motion off under
 `target="_blank" rel="noopener noreferrer"`. For a goal that runs more than one
 round, also keep one `task-dashboard` artifact and update that same slug at each
 milestone: the widget is the summary, the artifact is the full board.
+
+{{WIDGET_BLOCK}}
 
 ## If a conductor dispatched you
 

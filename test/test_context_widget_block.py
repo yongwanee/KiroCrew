@@ -120,6 +120,29 @@ class TestWidgetBlockPlaceholder:
         assert "prefer" not in result.lower(), "less-branch wording leaked"
 
 
+class TestConductorCarriesTheWidgetBlock:
+    """The conductor draws its introduction and task board as widgets, so its own
+    prompt carries the same per-surface pointer the default prompt does. The worker
+    reports to a ledger, not a person, and stays without one."""
+
+    def test_conductor_prompt_resolves_the_pointer_on_the_dashboard_only(self):
+        from kiro_crew.agent_parts.spec_prompts import _CONDUCTOR_SYSTEM_PROMPT
+
+        assert "{{WIDGET_BLOCK}}" in _CONDUCTOR_SYSTEM_PROMPT
+        on_dashboard = _resolve(_CONDUCTOR_SYSTEM_PROMPT, "dashboard_member-kirocrew-conductor")
+        assert "## Inline Widgets" in on_dashboard
+        assert "The frame is themed" in on_dashboard
+        on_slack = _resolve(_CONDUCTOR_SYSTEM_PROMPT, "slack:C123:123.456")
+        assert "{{WIDGET_BLOCK}}" not in on_slack
+        assert "## Inline Widgets" not in on_slack
+
+    def test_worker_prompt_has_no_widget_pointer(self):
+        from kiro_crew.agent_parts.spec_prompts import _WORKER_SYSTEM_PROMPT
+
+        assert "{{WIDGET_BLOCK}}" not in _WORKER_SYSTEM_PROMPT
+        assert "## Inline Widgets" not in _resolve(_WORKER_SYSTEM_PROMPT, "dashboard:abc")
+
+
 class TestMaxSubagentsPlaceholder:
     """`{{MAX_SUBAGENTS}}` expands to the concurrent cap IN FORCE on every transport."""
 

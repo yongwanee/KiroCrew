@@ -673,13 +673,17 @@ def _conductor_spec(
     # The charter already states the work-ledger flow in detail, so the shared
     # protocol block (``_conductor_prompt``) is not appended here.
     config["prompt"] = agent_mod._CONDUCTOR_SYSTEM_PROMPT
-    # The two skills this prompt names: ``goal-conductor`` carries the operating
-    # procedure it says to read first, and ``dashboard`` is how it changes the page
-    # it reports on. Mapped rather than assumed reachable: this spec is a custom
-    # template, so with no mapping its search scope is empty and neither document
-    # can be found. The alias installer emits this same body, so the alias carries
-    # the mapping too.
-    skill_resources.map_prompt_skills(config, "goal-conductor", "dashboard")
+    # The skills this prompt names: ``goal-conductor`` carries the operating
+    # procedure it says to read first, ``dashboard`` is how it changes the page
+    # it reports on, and ``widgets`` / ``living-ui`` / ``artifacts`` are how it
+    # draws the introduction, the board and any other picture in the dashboard
+    # chat (the ``{{WIDGET_BLOCK}}`` section names ``widgets`` and ``artifacts``).
+    # Mapped rather than assumed reachable: this spec is a custom template, so with
+    # no mapping its search scope is empty and no document can be found. The alias
+    # installer emits this same body, so the alias carries the mapping too.
+    skill_resources.map_prompt_skills(
+        config, "goal-conductor", "dashboard", "widgets", "living-ui", "artifacts"
+    )
     config["tools"] = [
         "execute_bash",
         "fs_read",
