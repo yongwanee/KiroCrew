@@ -141,15 +141,21 @@ _STEER_MIN_VERSIONS: dict[str, tuple[tuple[int, int, int], str]] = {
     ),
 }
 
+#: ``x.y.z`` with an optional SemVer prerelease; build metadata is ignored, as in SemVer.
+_STEER_VERSION_SHAPE = re.compile(r"(\d{1,9})\.(\d{1,9})\.(\d{1,9})(?![\d.])(-[0-9A-Za-z.-]+)?")
+
 
 def steer_version_issue(backend: str, agent_version: str) -> str:
     """Why *agent_version* of *backend* is too old to steer, or ``""`` when it is not
-    known to be. An absent or unreadable version is not refused, as for pi."""
+    known to be. An absent or unreadable version is not refused, as for pi. A
+    prerelease of the floor itself (``0.65.0-rc.1``) sorts below it, as in SemVer."""
     floor_and_fix = _STEER_MIN_VERSIONS.get(backend)
-    if floor_and_fix is None or not re.match(r"\d{1,9}\.\d{1,9}\.\d{1,9}", agent_version or ""):
+    match = _STEER_VERSION_SHAPE.match(agent_version or "")
+    if floor_and_fix is None or match is None:
         return ""
     floor, fix = floor_and_fix
-    if _adapter_version_at_least(agent_version, floor):
+    found = tuple(int(part) for part in match.group(1, 2, 3))
+    if found > floor or (found == floor and match.group(4) is None):
         return ""
     minimum = ".".join(str(part) for part in floor)
     return (

@@ -31,6 +31,9 @@ FRAMES = Path(__file__).resolve().parent / "fixtures" / "acp_frames"
         (CLAUDE, "0.64.9", "0.65.0", "npm i -g @agentclientprotocol/claude-agent-acp"),
         (CLAUDE, "0.61.0", "0.65.0", "npm i -g @agentclientprotocol/claude-agent-acp"),
         (GOOSE, "1.37.0", "1.38.0", "download_cli.sh | bash"),
+        # A prerelease of the floor sorts below it.
+        (CLAUDE, "0.65.0-rc.1", "0.65.0", "npm i -g @agentclientprotocol/claude-agent-acp"),
+        (GOOSE, "1.38.0-beta", "1.38.0", "download_cli.sh | bash"),
     ],
 )
 def test_below_the_floor_names_installed_minimum_and_fix(backend, version, minimum, fix):
@@ -42,13 +45,20 @@ def test_below_the_floor_names_installed_minimum_and_fix(backend, version, minim
 
 @pytest.mark.parametrize(
     ("backend", "version"),
-    [(CLAUDE, "0.65.0"), (CLAUDE, "0.93.0"), (GOOSE, "1.38.0"), (GOOSE, "1.54.0")],
+    [
+        (CLAUDE, "0.65.0"),
+        (CLAUDE, "0.93.0"),
+        (CLAUDE, "0.65.0+build.7"),
+        (CLAUDE, "0.66.0-rc.1"),
+        (GOOSE, "1.38.0"),
+        (GOOSE, "1.54.0"),
+    ],
 )
 def test_at_or_above_the_floor_is_not_refused(backend, version):
     assert steer_version_issue(backend, version) == ""
 
 
-@pytest.mark.parametrize("version", ["", "unknown", "dev"])
+@pytest.mark.parametrize("version", ["", "unknown", "dev", "0.1.0000000000", "0.1.0.4"])
 def test_an_unknown_version_is_not_refused(version):
     """As for pi: only a version known to be old is refused."""
     assert steer_version_issue(CLAUDE, version) == ""
