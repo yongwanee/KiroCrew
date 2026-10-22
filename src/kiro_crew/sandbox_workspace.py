@@ -58,6 +58,55 @@ def _literal_ancestor_guards(paths: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(guards)
 
 
+def _caller_can_rename(path: str) -> bool:
+    """Whether a process running as this uid could rename the directory *path*.
+
+    ``rename(2)`` needs write permission on the PARENT directory, and the owner of a
+    directory can grant itself that permission with ``chmod`` at any time, so a parent
+    this uid owns counts even while its mode withholds the write bit. A sticky parent
+    (``/tmp``, ``/private/tmp``) additionally requires owning *path* or the parent, and
+    owning the parent is already covered; a sticky parent this uid neither owns nor can
+    write fails the same ``W_OK`` test. A parent that cannot be inspected is reported
+    renameable: guarding a directory that turns out to be fixed costs one rule, while
+    skipping one that can move frees every seal beneath it.
+    """
+    parent = os.path.dirname(os.path.normpath(path))
+    try:
+        info = os.stat(parent)
+    except OSError:
+        return True
+    geteuid = getattr(os, "geteuid", None)
+    owned = geteuid is not None and info.st_uid == geteuid()
+    return owned or os.access(parent, os.W_OK)
+
+
+def _renameable_ancestor_guards(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Every ancestor of *paths*, down from *paths* themselves, that this uid can rename.
+
+    A read-only seal holds only while every directory on its path stays where it is: a
+    renamed ancestor carries the seal away and frees the sealed name for a planted
+    replacement that the unsandboxed gateway then reads. The walk runs to the filesystem
+    root for EACH path independently and keeps every directory :func:`_caller_can_rename`
+    says could move -- no common ceiling, because seals that live under different roots
+    (a data home under ``$HOME``, a ``KIRO_HOME`` relocated to an operator-owned folder in
+    ``/private/tmp``) have different renameable chains, and a renameable directory may
+    sit ABOVE one that is fixed. Directories this uid cannot rename (``/home``, ``/``,
+    ``/private/tmp`` itself) are left out, so the namespace launcher never re-binds a
+    system tree and the Seatbelt profile carries no rule that could never matter.
+    """
+    guards: list[str] = []
+    for item in paths:
+        current = os.path.normpath(item)
+        while True:
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            if current not in guards and _caller_can_rename(current):
+                guards.append(current)
+            current = parent
+    return tuple(guards)
+
+
 def prime_voice_runtime_sandbox_paths() -> str:
     """Cache and create the canonical agent-denied decoder runtime off-loop.
 

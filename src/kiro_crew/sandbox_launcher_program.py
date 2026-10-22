@@ -11,8 +11,9 @@ and every import sits at module level, ahead of the isolation it builds.
 :func:`main` forks. The parent writes the child's identity uid/gid maps and waits; the
 child enters the user and mount namespaces (:func:`enter_namespaces`), then
 :func:`run_child` builds the sandbox through its stages -- among them
-:func:`stage_private_windows`, :func:`seal_readonly`, :func:`mask_sensitive`,
-:func:`apply_carveouts`, :func:`mask_sensitive_files`, :func:`mask_ssh_keys`,
+:func:`stage_private_windows`, :func:`pin_seal_parents`, :func:`seal_readonly`,
+:func:`mask_sensitive`, :func:`apply_carveouts`, :func:`mask_sensitive_files`,
+:func:`mask_ssh_keys`,
 :func:`scrub_env`, :func:`drop_privileges`, :func:`install_seccomp` and
 :func:`refuse_hardlinked_credentials` -- and ends in :func:`exec_agent`.
 :func:`run_child` and :func:`place_masks` fix the order. The child keeps the real uid
@@ -142,6 +143,10 @@ class Launch:
         self.private_dirs = plan["private_dirs"]
         self.private_dir_ids = plan["private_dir_ids"]
         self.readonly_dirs = plan["readonly_dirs"]
+        #: The renameable ancestors of every read-only seal, bound over themselves by
+        #: :func:`pin_seal_parents` so a rename of any of them fails with EBUSY. Absent
+        #: in an older payload -> pin nothing, which is main's behaviour before this.
+        self.parent_pins = plan.get("parent_pins", ())
         self.writable_dirs = plan["writable_dirs"]
         self.sensitive_files = plan["sensitive_files"]
         self.fail_closed_file_masks = plan["fail_closed_file_masks"]
@@ -1259,6 +1264,66 @@ def stage_private_windows(launch):
             os.close(_win_fd)
 
 
+def pin_seal_parents(launch):
+    """Bind each renameable ancestor of a read-only seal over itself, recursively.
+
+    A seal is a bind of the sealed path over itself, and the kernel refuses ``rename(2)``
+    only of a directory that IS a mountpoint, not of one that merely CONTAINS one. So an
+    agent able to write ``~`` could rename ``~/.kiro`` aside: the read-only bind on
+    ``~/.kiro/agents`` moves with it, the name ``~/.kiro/agents`` is free again, and a
+    spec planted there is what the unsandboxed gateway reads next. Making every such
+    ancestor a mountpoint of its own closes that: each rename returns EBUSY, and seccomp
+    denies the ``umount2`` that would undo it.
+
+    The bind is READ-WRITE (no remount follows), so the directory keeps every permission
+    it had; only renaming or removing the directory itself changes. It is RECURSIVE: a
+    non-recursive bind would drop whatever is already mounted beneath the directory from
+    the agent's view, and inside a user namespace the kernel refuses one outright when a
+    locked host mount sits below. Shallowest first, so each pin lands on top of the one
+    above it.
+
+    Runs after :func:`stage_private_windows` (a window is staged from the real tree, not
+    from a pin) and BEFORE :func:`seal_readonly` and every hide, so each seal and hide is
+    mounted on top of the pins and the visible tree is exactly the one the later stages
+    built.
+
+    A pin whose name is absent is skipped -- nothing is there to move. A name that
+    reaches a different object after the bind than before it was swapped mid-pin, and
+    the pin landed off target, so the spawn is refused.
+    """
+    for d in sorted(dict.fromkeys(launch.parent_pins), key=lambda p: (p.count("/"), p)):
+        target = d.encode()
+        _pin_fd, _pin_target = _pin_mount_path(launch, target, stat.S_ISDIR)
+        if _pin_target is None:
+            continue
+        try:
+            _pin_id = os.fstat(_pin_fd)
+            _mount_or_die(
+                launch,
+                _pin_target,
+                _pin_target,
+                _MS_BIND | _MS_REC,
+                "pinning seal parent %s against a rename" % d,
+            )
+        finally:
+            os.close(_pin_fd)
+        _post_fd, _post_target = _pin_mount_path(launch, target, stat.S_ISDIR)
+        _same = False
+        if _post_target is not None:
+            try:
+                _post_id = os.fstat(_post_fd)
+                _same = _post_id.st_dev == _pin_id.st_dev and _post_id.st_ino == _pin_id.st_ino
+            finally:
+                os.close(_post_fd)
+        if not _same:
+            sys.exit(
+                "sandbox: BLOCKED -- %s changed identity while being pinned, so a "
+                "parent of a read-only seal could still be renamed away. Another "
+                "process is rewriting that name. Lower agent.sandbox to run without "
+                "this control deliberately." % d
+            )
+
+
 def seal_readonly(launch):
     """Bind each read-only dir over itself and remount that bind ``MS_RDONLY``.
 
@@ -2271,6 +2336,29 @@ def enter_exec_cwd(launch):
         sys.exit("sandbox: FATAL — the launch directory is not empty")
 
 
+def reenter_launch_cwd(launch, cwd):
+    """Re-enter the directory this launcher started in, by name, now the mounts are placed.
+
+    A process's working directory is a reference to one (mount, directory) pair, taken
+    before any of the launcher's mounts existed. :func:`pin_seal_parents` binds parents
+    of the seals over themselves, and every later seal and mask attaches to the TOP of
+    those pins, so a lookup that starts from the inherited directory -- a relative open,
+    ``..``, or ``/proc/<pid>/cwd`` -- walks the original mount underneath and meets none
+    of them. Entering *cwd* by name resolves through the pins, so the agent stands on
+    the same mounts every absolute lookup reaches. A launch directory that can no
+    longer be entered refuses the spawn: running on the stale reference would leave
+    every seal on that path bypassable.
+    """
+    try:
+        os.chdir(cwd)
+    except OSError as exc:
+        sys.exit(
+            "sandbox: BLOCKED -- cannot re-enter the launch directory %s after placing "
+            "the seals (%s), so the agent would start on a mount beneath them. Lower "
+            "agent.sandbox to run without this control deliberately." % (cwd, exc.strerror or exc)
+        )
+
+
 def exec_agent(launch, argv):
     """Replace this process with the agent command, in the scrubbed environment.
 
@@ -2297,12 +2385,14 @@ def exec_agent(launch, argv):
 def place_masks(launch):
     """Place every mount, in the order the kernel's mount semantics require.
 
-    Windows are staged before anything is masked, read-only seals land before the hides
+    Windows are staged before anything is masked, the seal parents are pinned before the
+    seals beneath them, read-only seals land before the hides
     placed on top of them, carve-outs after the seals they punch through, the exposed
     files are restored into their empty masks, and the single files and ``~/.ssh`` are
     masked last.
     """
     stage_private_windows(launch)
+    pin_seal_parents(launch)
     seal_readonly(launch)
     mask_sensitive(launch)
     apply_carveouts(launch)
@@ -2321,7 +2411,18 @@ def run_child(launch, argv):
     pick_stand_in_root(launch)
     check_crew_home_aliases(launch)
     preread_exposed_files(launch)
+    try:
+        launch_cwd = os.getcwd()
+    except OSError as exc:
+        # Without a name to re-enter, the agent would start on the inherited reference
+        # to the mount beneath every pin, seal and mask placed below. Refuse instead.
+        sys.exit(
+            "sandbox: BLOCKED -- cannot resolve the launch directory before placing the "
+            "seals (%s), so the agent could not be moved onto them. Lower agent.sandbox "
+            "to run without this control deliberately." % (exc.strerror or exc)
+        )
     place_masks(launch)
+    reenter_launch_cwd(launch, launch_cwd)
     confirm_crew_home_aliases(launch)
     scrub_env(launch)
     drop_privileges(launch)
