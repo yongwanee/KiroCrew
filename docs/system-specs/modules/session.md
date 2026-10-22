@@ -5322,7 +5322,7 @@ so the next user turn gets a fresh budget and no recovery duration is recorded
 for an outage that never closed -- an interrupted run never ran its retry, so
 nothing observed the dependency come back.
 
-**Every recovery wait in `_run_chat` re-reads its interrupt signals after the
+**Every recovery wait of a dashboard turn re-reads its interrupt signals after the
 sleep, and WHAT it re-reads depends on what it re-queues.** All three waits on the
 exception/settlement path check their guards, sleep a multi-second floor, then
 insert at queue index 0. A Stop, steer or follow-up arriving during that sleep
@@ -5332,7 +5332,7 @@ continuations -- so each arm re-reads for itself.
 
 | Wait | Re-reads | Handed back on a drop |
 |---|---|---|
-| L1 gateway-capacity (CONTINUATION) | suppress, `_stop_pressed()`, queued user follow-up, `_pending_steers` | the counted `_infra_retries`; the ladder run is `forget`-ed, not recorded as recovered |
+| L1 gateway-capacity (CONTINUATION, `_turn_ending_chain`) | suppress, `_stop_pressed()`, queued user follow-up, `_pending_steers` | the counted `_infra_retries`; the ladder run is `forget`-ed, not recorded as recovered |
 | same-model transient 5xx (VERBATIM REPLAY) | suppress, `_stop_pressed()` **only** | all four per-turn budgets (`_transient_5xx_retries`, `_infra_retries`, `_fallback_candidate_idx`, `_fallback_walked`), byte-identical to the throttle-exhaustion drop arm |
 | post-token one-shot (CONTINUATION) | suppress, `_stop_pressed()`, queued user follow-up, `_pending_steers` | nothing: `_posttoken_retry_used` is consumed BELOW the wait, so a dropped retry never spends the allowance |
 

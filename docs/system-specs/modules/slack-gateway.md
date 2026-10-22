@@ -1209,7 +1209,7 @@ When a message arrives while a session is actively processing, it's queued inste
 Bidirectional message mirroring between dashboard chat sessions and Slack threads:
 
 - **Slack → Dashboard**: `handle_message()` asks `maybe_route_linked_thread` (`slack/handler_runtime/inbound.py`), which checks `_slack_to_slot` reverse lookup; if linked, routes message to dashboard slot's `_run_chat()` queue
-- **Dashboard → Slack**: `_run_chat()` mirrors user messages and agent responses to the linked thread via `start_stream()` / `append_task()` / `stop_stream()`
+- **Dashboard → Slack**: the dashboard turn (`_run_chat()` and its phases) mirrors user messages and agent responses to the linked thread via `start_stream()` / `append_task()` / `stop_stream()`
 - **Link to Dashboard button**: `LINK_DASHBOARD_ACTION` in timing footer imports thread history into a new dashboard slot
 - **`!link-to-dashboard` command**: same as button but triggered via bang command inside a thread
 - **Session resume**: shows Thread/DM choice buttons; `_handle_resume_choice()` with per-session lock for idempotency. When the chat being resumed is a dashboard chat whose tab is closed (`DashboardState.slot_exists` is false; a slot still being restored counts as open), the resume still links the Slack thread or DM and replays recent messages, but the confirmation says the dashboard tab stays closed and can be reopened from History instead of saying the session resumed

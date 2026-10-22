@@ -853,10 +853,10 @@ Wired sites:
 - `apps/registry_pipeline/sources.py` / `apps/routes.py` — clone-sandbox-mode decision routes
   through `current_context().registry` (`_context_clone_sandbox_mode`).
 - Telemetry `record_event` sites — `dashboard/server_runtime/diagnostics.py` records `gateway_start`
-  at boot; `dashboard/chat_runner.py` and `slack/handler_runtime/turn.py` record one
-  `interaction` event per successful chat turn (immediately after the
-  `record_success` call, non-cancelled / non-retrying branch only; cancelled
-  turns emit nothing). **The interaction payload is strictly metadata —
+  at boot; `_turn_context_usage` (`dashboard/chat_turn/turn_stats.py`) and
+  `slack/handler_runtime/turn.py` record one `interaction` event per successful chat turn
+  (immediately after the `record_success` call, non-cancelled / non-retrying branch only;
+  cancelled turns emit nothing). **The interaction payload is strictly metadata —
   `session_key`, `surface` (`"dashboard"` / `"slack"`), and `model` — never
   prompt/response text or file contents.** All sites are best-effort
   (try/except-Exception, debug log); the Default provider is a no-op so

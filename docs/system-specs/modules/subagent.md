@@ -2346,7 +2346,7 @@ A record's terminal outcome is three-way, with a **single canonical source**: th
 
 ## Stop reason → state (`classify_stop_reason`)
 
-`EVENT_COMPLETE` only says the stream ENDED. The ACP layer sets `stop_reason` on it (`acp/types.py`: `end_turn`, `cancelled`, `stale_recover`, `refusal`, `error: tool stall`, `error: compaction failed`, `error: …`), and every completion consumer — the main chat (`dashboard/chat_runner.py`), the sub-agent run (`subagent_manager/run_turn.py` and `run_yields.py`), nested children (same path) and the task runner (`task_executor.py`) — maps it through ONE function, `acp.types.classify_stop_reason(stop_reason, *, compaction_transient=False) -> StopClass`. No entry spells its own `startswith("error:")` or a private retry budget; `test_subagent_stop_reason_consistency.py` pins both the table and each entry's use of it.
+`EVENT_COMPLETE` only says the stream ENDED. The ACP layer sets `stop_reason` on it (`acp/types.py`: `end_turn`, `cancelled`, `stale_recover`, `refusal`, `error: tool stall`, `error: compaction failed`, `error: …`), and every completion consumer — the main chat (`_on_complete` in `dashboard/chat_turn/turn_stats.py`), the sub-agent run (`subagent_manager/run_turn.py` and `run_yields.py`), nested children (same path) and the task runner (`task_executor.py`) — maps it through ONE function, `acp.types.classify_stop_reason(stop_reason, *, compaction_transient=False) -> StopClass`. No entry spells its own `startswith("error:")` or a private retry budget; `test_subagent_stop_reason_consistency.py` pins both the table and each entry's use of it.
 
 | `stop_reason` | `StopClass.name` | recoverable | Sub-agent run | Main chat | Task runner |
 |---|---|---|---|---|---|
