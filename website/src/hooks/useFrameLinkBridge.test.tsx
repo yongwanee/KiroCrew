@@ -1,21 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { useRef } from 'react'
-import { i18nT } from '../i18n/t'
 import { OPEN_MESSAGE_TYPE } from './useFrameOpenLink'
-import { MAX_WEB_LINK_LENGTH, useFrameLinkBridge, webUrlOf } from './useFrameLinkBridge'
+import { useFrameLinkBridge, webUrlOf } from './useFrameLinkBridge'
 
 const URL_A = 'https://github.com/example-org/repo/pull/7'
 
 /** A host with one frame. The frame's window is a unique object: the hook compares identity only. */
-function Host({ frameWindow, open, gesture }: {
-  frameWindow: Window
+function Host({ frame, open, gesture }: {
+  frame: HTMLIFrameElement
   open: (url: string) => void
   gesture?: (frame: HTMLIFrameElement) => boolean
 }) {
-  const ref = useRef<HTMLIFrameElement | null>({ contentWindow: frameWindow } as HTMLIFrameElement)
-  const dialog = useFrameLinkBridge([ref], open, gesture ?? (() => true))
-  return <>{dialog}</>
+  const ref = useRef<HTMLIFrameElement | null>(frame)
+  useFrameLinkBridge([ref], open, gesture ?? (() => true))
+  return null
+}
+
+function fakeFrame(): HTMLIFrameElement {
+  return { contentWindow: {} as Window, blur: vi.fn() } as unknown as HTMLIFrameElement
 }
 
 function post(data: unknown, source: unknown) {
@@ -24,55 +27,58 @@ function post(data: unknown, source: unknown) {
   act(() => { window.dispatchEvent(event) })
 }
 
-const title = () => i18nT('hooks.frameLinkBridge.title')
-const openLabel = () => i18nT('hooks.frameLinkBridge.open')
-
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 describe('useFrameLinkBridge', () => {
-  it('asks with the full URL shown, and opens it only on confirm', async () => {
-    const frameWindow = {} as Window
+  it('opens on a real click in its frame, with no dialog', () => {
+    const frame = fakeFrame()
     const open = vi.fn()
-    render(<Host frameWindow={frameWindow} open={open} />)
-    post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, frameWindow)
-    expect(await screen.findByText(title())).toBeInTheDocument()
-    expect(screen.getByText(URL_A)).toBeInTheDocument()
-    expect(open).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: openLabel() }))
-    await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
+    render(<Host frame={frame} open={open} />)
+    post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, frame.contentWindow)
+    expect(open).toHaveBeenCalledTimes(1)
     expect(open).toHaveBeenCalledWith(URL_A)
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('opens nothing when the person cancels', async () => {
-    const frameWindow = {} as Window
+  it('opens nothing without a click in that frame', () => {
+    const frame = fakeFrame()
     const open = vi.fn()
-    render(<Host frameWindow={frameWindow} open={open} />)
-    post({ type: OPEN_MESSAGE_TYPE, url: 'https://code.example.test/reviews/CR-1' }, frameWindow)
-    await screen.findByText(title())
-    fireEvent.click(screen.getByRole('button', { name: i18nT('components.confirmDialog.cancel') }))
-    await waitFor(() => expect(screen.queryByRole('button', { name: openLabel() })).toBeNull())
+    render(<Host frame={frame} open={open} gesture={() => false} />)
+    post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, frame.contentWindow)
     expect(open).not.toHaveBeenCalled()
   })
 
-  it('does not even ask without a click in that frame', () => {
+  it('opens once per click: focus leaves the frame, so a page posting again opens nothing', () => {
+    const frame = document.createElement('iframe')
+    frame.tabIndex = 0
+    document.body.appendChild(frame)
     const frameWindow = {} as Window
+    Object.defineProperty(frame, 'contentWindow', { configurable: true, value: frameWindow })
     const open = vi.fn()
-    render(<Host frameWindow={frameWindow} open={open} gesture={() => false} />)
-    post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, frameWindow)
-    expect(screen.queryByText(title())).toBeNull()
-    expect(open).not.toHaveBeenCalled()
+    try {
+      render(<Host frame={frame} open={open} gesture={(f) => document.activeElement === f} />)
+      frame.focus()
+      expect(document.activeElement).toBe(frame)
+      post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, frameWindow)
+      post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, frameWindow)
+      post({ type: OPEN_MESSAGE_TYPE, url: 'https://example.test/other' }, frameWindow)
+      expect(open).toHaveBeenCalledTimes(1)
+      expect(document.activeElement).not.toBe(frame)
+    } finally {
+      frame.remove()
+    }
   })
 
   it('ignores a message from a window that is not its frame', () => {
-    const frameWindow = {} as Window
+    const frame = fakeFrame()
     const open = vi.fn()
-    render(<Host frameWindow={frameWindow} open={open} />)
+    render(<Host frame={frame} open={open} />)
     post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, {} as Window)
     post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, window)
     post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, null)
-    expect(screen.queryByText(title())).toBeNull()
+    expect(open).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -85,32 +91,32 @@ describe('useFrameLinkBridge', () => {
     '/relative/path',
     'https://user:pass@example.test/',
     'https://github.com@evil.example/',
-    `https://example.test/${'a'.repeat(MAX_WEB_LINK_LENGTH)}`,
-  ])('refuses %s without asking', (url) => {
-    const frameWindow = {} as Window
+  ])('refuses %s', (url) => {
+    const frame = fakeFrame()
     const open = vi.fn()
-    render(<Host frameWindow={frameWindow} open={open} />)
-    post({ type: OPEN_MESSAGE_TYPE, url }, frameWindow)
-    expect(screen.queryByText(title())).toBeNull()
+    render(<Host frame={frame} open={open} />)
+    post({ type: OPEN_MESSAGE_TYPE, url }, frame.contentWindow)
     expect(open).not.toHaveBeenCalled()
   })
 
-  it('shows and opens the parsed URL, so what is read is what opens', () => {
+  it('opens the parsed URL, so what the hover title shows is what opens', () => {
     expect(webUrlOf({ type: OPEN_MESSAGE_TYPE, url: 'HTTPS://Example.TEST/a b' })).toBe('https://example.test/a%20b')
     expect(webUrlOf({ type: OPEN_MESSAGE_TYPE, url: 'http://example.test' })).toBe('http://example.test/')
     expect(webUrlOf({ type: 'kirocrew-dashboard:act', url: URL_A })).toBeNull()
+    const long = `https://example.test/${'a'.repeat(4096)}`
+    expect(webUrlOf({ type: OPEN_MESSAGE_TYPE, url: long })).toBe(long)
   })
 
-  it('opens through window.open with noopener and noreferrer by default', async () => {
-    const frameWindow = {} as Window
+  it('opens through window.open with noopener and noreferrer by default', () => {
+    const frame = fakeFrame()
     const spy = vi.spyOn(window, 'open').mockImplementation(() => null)
     function DefaultHost() {
-      const ref = useRef<HTMLIFrameElement | null>({ contentWindow: frameWindow } as HTMLIFrameElement)
-      return <>{useFrameLinkBridge([ref], undefined, () => true)}</>
+      const ref = useRef<HTMLIFrameElement | null>(frame)
+      useFrameLinkBridge([ref], undefined, () => true)
+      return null
     }
     render(<DefaultHost />)
-    post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, frameWindow)
-    fireEvent.click(await screen.findByRole('button', { name: openLabel() }))
-    await waitFor(() => expect(spy).toHaveBeenCalledWith(URL_A, '_blank', 'noopener,noreferrer'))
+    post({ type: OPEN_MESSAGE_TYPE, url: URL_A }, frame.contentWindow)
+    expect(spy).toHaveBeenCalledWith(URL_A, '_blank', 'noopener,noreferrer')
   })
 })

@@ -417,7 +417,7 @@ describe('WidgetFrame openInNewTab', () => {
       .find((t) => t.includes('kirocrew-dashboard:open'))
     expect(bridge).toBeDefined()
     expect(bridge).toContain("window.open(u.href, '_blank', 'noopener,noreferrer')")
-    expect(bridge).toContain(JSON.stringify(i18nT('hooks.frameLinkBridge.title')))
+    expect(bridge).not.toContain('confirm(')
     expect(parsed.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts')
   })
 })

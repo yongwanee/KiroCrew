@@ -6004,10 +6004,6 @@
     }
   },
   "hooks": {
-    "frameLinkBridge": {
-      "open": "Open link",
-      "title": "Open this link?"
-    },
     "usePanelTabs": {
       "git": "Git"
     },

@@ -1543,8 +1543,10 @@ to this kind would store content no reader can parse.
   as a crewmate's Dashboard frame. A link in the page opens through the host:
   `buildSrcdoc({ linkBridge: true })` turns a `_blank` or bare web link click,
   and `window.open`, into a `kirocrew-dashboard:open` message, and
-  `useFrameLinkBridge` opens an absolute `http(s)` URL only after a click in
-  that frame and a confirm that shows the URL. The header also sets `connect-src 'none'`,
+  `useFrameLinkBridge` opens an absolute `http(s)` URL only on a real click in
+  that frame, once per click, with no dialog. Each web link gets its resolved URL
+  as a hover title, so the URL shows before the click, as it does for a link in a
+  session. The header also sets `connect-src 'none'`,
   `object-src 'none'`, `base-uri 'none'` and `form-action 'none'`, so a document
   cannot fetch, open a WebSocket or beacon to another host even without its own
   `<meta>` CSP. Every shipped caller's meta CSP already blocks the same channels,

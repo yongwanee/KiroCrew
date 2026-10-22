@@ -160,6 +160,77 @@ describe('link-bridge shim', () => {
     expect(posted).toEqual([])
   })
 
+  function middle(host: HTMLElement, selector: string, button = 1): boolean {
+    const el = host.querySelector<HTMLElement>(selector)!
+    let prevented = false
+    const after = (e: Event) => { prevented = e.defaultPrevented; e.preventDefault() }
+    window.addEventListener('auxclick', after)
+    try {
+      el.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button }))
+    } finally {
+      window.removeEventListener('auxclick', after)
+    }
+    return prevented
+  }
+
+  it.each([
+    ['_blank', '<a id="t" href="https://example.test/m" target="_blank">x</a>'],
+    ['bare', '<a id="t" href="https://example.test/m">x</a>'],
+    ['_self', '<a id="t" href="https://example.test/m" target="_self">x</a>'],
+  ])('hands a middle-clicked %s web link to the host', (_label, html) => {
+    const { posted } = install()
+    const host = mount(html)
+    expect(middle(host, '#t')).toBe(true)
+    expect(posted).toEqual([{ type: OPEN, url: 'https://example.test/m' }])
+  })
+
+  it('leaves a middle-clicked fragment link and a right-click alone', () => {
+    const { posted } = install()
+    const host = mount('<a id="f" href="#part">f</a><a id="w" href="https://example.test/r">w</a>')
+    expect(middle(host, '#f')).toBe(false)
+    expect(middle(host, '#w', 2)).toBe(false)
+    expect(posted).toEqual([])
+  })
+
+  it('finds a link that wraps a custom element whose shadow content was clicked', () => {
+    const { posted } = install()
+    const host = mount('<a id="wrap" href="https://example.test/shadow" target="_blank"><x-label id="lbl"></x-label></a>')
+    const label = host.querySelector('#lbl')!
+    const inner = document.createElement('span')
+    inner.textContent = 'open'
+    label.attachShadow({ mode: 'open' }).appendChild(inner)
+    let prevented = false
+    const after = (e: Event) => { prevented = e.defaultPrevented; e.preventDefault() }
+    window.addEventListener('click', after)
+    try {
+      inner.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }))
+    } finally {
+      window.removeEventListener('click', after)
+    }
+    expect(prevented).toBe(true)
+    expect(posted).toEqual([{ type: OPEN, url: 'https://example.test/shadow' }])
+  })
+
+  it('shows a web link URL on hover or focus as its title, keeping an author title', () => {
+    install()
+    const host = mount(
+      '<a id="w" href="HTTPS://Example.TEST/a b">w</a>' +
+      '<a id="t" href="https://example.test/x" title="Own title">t</a>' +
+      '<a id="f" href="#part">f</a>' +
+      '<a id="j" href="javascript:void(0)">j</a>',
+    )
+    const over = (sel: string) =>
+      host.querySelector(sel)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    over('#w')
+    over('#t')
+    over('#f')
+    host.querySelector<HTMLElement>('#j')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    expect(host.querySelector('#w')!.getAttribute('title')).toBe('https://example.test/a%20b')
+    expect(host.querySelector('#t')!.getAttribute('title')).toBe('Own title')
+    expect(host.querySelector('#f')!.hasAttribute('title')).toBe(false)
+    expect(host.querySelector('#j')!.hasAttribute('title')).toBe(false)
+  })
+
   it('turns window.open into a host request for a web URL only', () => {
     const { posted, win } = install()
     expect(win.open?.('https://example.test/a')).toBeNull()
@@ -167,6 +238,16 @@ describe('link-bridge shim', () => {
     win.open?.('data:text/html,x')
     win.open?.('/relative')
     expect(posted).toEqual([{ type: OPEN, url: 'https://example.test/a' }])
+  })
+
+  it('leaves window.open writable and configurable, so a page declaring its own open still runs', () => {
+    const { win } = install()
+    const desc = Object.getOwnPropertyDescriptor(win, 'open')
+    expect(desc?.writable).toBe(true)
+    expect(desc?.configurable).toBe(true)
+    const mine = () => 'page-owned'
+    win.open = mine
+    expect(win.open).toBe(mine)
   })
 
   it('does nothing in a document with no parent', () => {

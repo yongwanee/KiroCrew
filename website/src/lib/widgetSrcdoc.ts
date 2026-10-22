@@ -9,8 +9,8 @@
 // or open a window of its own. Links open through the host instead: the
 // `linkBridge` option injects LINK_BRIDGE_SHIM_BODY, which hands a `_blank` or
 // bare web link click, and `window.open`, to the host's `useFrameLinkBridge`,
-// and the host opens the URL after a click in that frame and a confirm that
-// shows it. Callers that do not set `linkBridge` (an exported copy, the mochi
+// gives each web link its URL as a hover title, and the host opens the URL after
+// a real click in that frame. Callers that do not set `linkBridge` (an exported copy, the mochi
 // pet frame) keep EXTERNAL_LINK_TARGET_SHIM_BODY or opt out of it with
 // `rewriteBareLinks: false`.
 //
@@ -55,6 +55,7 @@ import { sanitizeCssValue } from './cssSanitize'
  * link bridge (`linkBridge` here, `useFrameLinkBridge` in the host). Mirrored by
  * the `/sandbox-doc/` response header in `dashboard/handlers/sandbox_doc.py`. */
 export const AGENT_PAGE_SANDBOX = 'allow-scripts'
+
 
 /** CSS custom properties the parent app exposes to widgets. Resolved against
  * document.documentElement and serialized into the sandboxed srcdoc so widget
@@ -633,9 +634,11 @@ const EXTERNAL_LINK_TARGET_SHIM_BODY = `(function(){
  * Those frames are `sandbox="allow-scripts"` with no popup grant, so a page
  * cannot open a window itself; this hands the request to the host instead, as
  * `{type: 'kirocrew-dashboard:open', url}` -- the message the crew pages already
- * post. The host (`useFrameLinkBridge`) opens it only for a web URL, only right
- * after a click in this frame, and only once the person confirms the URL.
+ * post. The host (`useFrameLinkBridge`) opens it only for a web URL and only right
+ * after a real click in this frame, once per click.
  *
+ *   - A middle-click on a web link is handled the same way (it asks for a new
+ *     tab whatever the target).
  *   - A click on a link that would open a window (`target="_blank"` or any other
  *     target but `_self`) or that would navigate this frame to another site (a
  *     bare absolute `http(s)` link) is cancelled here and, when its href is an
@@ -650,8 +653,10 @@ const EXTERNAL_LINK_TARGET_SHIM_BODY = `(function(){
  * Registered on `window` in the capture phase before the page's own script runs,
  * so it fires first. Does nothing when the document has no parent (a downloaded
  * copy opened as a file, a document opened top-level), where ordinary links work.
- * Not a security boundary on its own: any page script can post the same message,
- * which is why the host checks the gesture and asks before opening.
+ * A web link without a title gets its resolved URL as one on hover or focus, so
+ * the URL shows before a click. Not a security boundary on its own: any page
+ * script can post the same message, which is why the host checks the frame, the
+ * URL and the gesture before opening.
  */
 const LINK_BRIDGE_SHIM_BODY = `(function(){
   if (window.parent === window) return;
@@ -666,22 +671,45 @@ const LINK_BRIDGE_SHIM_BODY = `(function(){
     if (!url) return;
     try { parent.postMessage({ type: T, url: url }, '*'); } catch (_) {}
   }
-  window.addEventListener('click', function(e){
-    var path = typeof e.composedPath === 'function' ? e.composedPath() : null;
-    var t = (path && path.length) ? path[0] : e.target;
-    if (!t || typeof t.closest !== 'function') return;
-    var a = t.closest('a[href],area[href]');
-    if (!a || a.closest('[data-action]')) return;
+  function linkOf(e){
+    // The composed path crosses shadow roots, so a link that wraps a custom
+    // element's shadow content is still found; closest() alone stops at the root.
+    var path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
+    for (var i = 0; i < path.length; i++) {
+      var n = path[i];
+      if (n && n.nodeType === 1 && (n.localName === 'a' || n.localName === 'area') && n.hasAttribute('href')) return n;
+    }
+    return null;
+  }
+  function onLink(e, middle){
+    var a = linkOf(e);
+    if (!a || (typeof a.closest === 'function' && a.closest('[data-action]'))) return;
     var target = (a.getAttribute('target') || '').trim().toLowerCase();
     var url = web(a.getAttribute('href') || '');
-    if (target === '_self') return;
-    if (!target && !url) return;
+    if (!middle && target === '_self') return;
+    if (!middle && !target && !url) return;
+    if (middle && !url) return;
     e.preventDefault();
     if (url) ask(url);
-  }, true);
-  var open = function(u){ ask(u); return null; };
-  try { Object.defineProperty(window, 'open', { value: open, configurable: false, writable: false }); }
-  catch (_) { try { window.open = open; } catch (_e) {} }
+  }
+  window.addEventListener('click', function(e){ onLink(e, false); }, true);
+  // Hover shows where a link goes, as in a session: a web link without a title
+  // gets its resolved URL as one. Some hosts (the desktop app) show no status
+  // bar for a framed link, so the title is the only place the URL appears.
+  function titleLink(e){
+    var a = linkOf(e);
+    if (!a || a.hasAttribute('title')) return;
+    var url = web(a.getAttribute('href') || '');
+    if (url) a.setAttribute('title', url);
+  }
+  window.addEventListener('mouseover', titleLink, true);
+  window.addEventListener('focusin', titleLink, true);
+  // A middle-click asks for a new tab whatever the target, which the frame cannot open.
+  window.addEventListener('auxclick', function(e){ if (e.button === 1) onLink(e, true); }, true);
+  // A plain assignment, not a locked property: a page script that declares its
+  // own top-level open (function or const) must still run. The sandbox already
+  // refuses a native popup, and the host checks every request.
+  try { window.open = function(u){ ask(u); return null; }; } catch (_) {}
 })();`
 
 /** The host half of the link bridge for a widget popped out into its own tab
@@ -689,35 +717,33 @@ const LINK_BRIDGE_SHIM_BODY = `(function(){
  * writes, holding the widget in an `AGENT_PAGE_SANDBOX` frame, so React and
  * `useFrameLinkBridge` are not there to answer the frame's open message. This
  * script is: the same checks (the message comes from the frame, the URL is an
- * absolute `http(s)` URL with no user name or password and at most 2048
- * characters, the person just clicked in the frame), then the browser's own
- * confirm showing the URL, then a `noopener,noreferrer` open. `__PROMPT__` is
- * replaced by `popoutLinkBridgeScript` with the localized question. */
+ * absolute `http(s)` URL with no user name or password, the person just clicked in
+ * the frame), then a `noopener,noreferrer` open, once per click. */
 const POPOUT_LINK_BRIDGE_BODY = `(function(){
   var T = 'kirocrew-dashboard:open';
-  var PROMPT = __PROMPT__;
   window.addEventListener('message', function(e){
     var f = document.querySelector('iframe');
     if (!f || !e.source || e.source !== f.contentWindow) return;
     var d = e.data;
     if (!d || typeof d !== 'object' || d.type !== T || typeof d.url !== 'string') return;
-    if (!d.url || d.url.length > 2048) return;
+    if (!d.url) return;
     var u;
     try { u = new URL(d.url); } catch (_) { return; }
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
     if (u.username || u.password) return;
     var ua = navigator.userActivation;
     if (!ua || !ua.isActive || document.activeElement !== f) return;
-    if (window.confirm(PROMPT + '\\n\\n' + u.href)) window.open(u.href, '_blank', 'noopener,noreferrer');
+    // Once per click: focus leaves the frame, so a frame posting again from the
+    // same click fails the focus check until the next real click.
+    try { f.blur(); } catch (_) {}
+    window.open(u.href, '_blank', 'noopener,noreferrer');
   });
 })();`
 
-/** The popped-out widget tab's link bridge, with `prompt` as the confirm's
- * question. The prompt is JSON-encoded with `<` escaped, so no string can close
- * the script element it is written into. */
-export function popoutLinkBridgeScript(prompt: string): string {
-  const literal = JSON.stringify(prompt).replace(/</g, '\\u003c')
-  return POPOUT_LINK_BRIDGE_BODY.replace('__PROMPT__', () => literal)
+/** The popped-out widget tab's link bridge: fixed first-party text, no widget
+ * content. */
+export function popoutLinkBridgeScript(): string {
+  return POPOUT_LINK_BRIDGE_BODY
 }
 
 /** In-iframe comment bridge. Vanilla JS string — no LLM/user
