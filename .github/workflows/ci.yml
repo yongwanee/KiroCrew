@@ -1797,6 +1797,8 @@ jobs:
           pytest -q --timeout=180 --no-cov \
             test/test_script_hooks.py \
             test/test_cron_script.py \
+            test/test_cron_script_execution.py \
+            test/test_cron_script_hardening.py \
             test/test_snapshot_read_only_real_view.py \
             test/test_pinned_order_real_sandbox.py \
             test/test_md_notebook_real_sandbox.py \

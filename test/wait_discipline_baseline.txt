@@ -79,7 +79,8 @@
  5 test_executors.py
  2 test_fargate_closed_forward_remedy.py
  2 test_feishu_client.py
- 2 test_handlers_memory_coverage.py
+ 1 test_handlers_memory_coverage.py
+ 1 test_handlers_memory_coverage_embeddings.py
  2 test_headless_memory_recognition.py
  3 test_heartbeat_cov80.py
  3 test_history_coverage.py

@@ -18,8 +18,4 @@
 18473 src/kiro_crew/dashboard/chat_runner.py
 2284 src/kiro_crew/sandbox_launcher_program.py
 3181 src/kiro_crew/security_posture.py
-3125 test/test_cron_script.py
-3102 test/test_handlers_memory_coverage.py
 12647 test/test_security.py
-3082 test/test_skills.py
-3093 test/test_subagent.py
